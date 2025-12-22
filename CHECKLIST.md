@@ -202,3 +202,55 @@ Main branch is complete and protected. All future experiments should:
 3. Keep `main` as reproducible baseline
 
 **Current active branch:** `intervene` (Phase 1 Experiment 1)
+
+---
+
+## 🧪 Phase-1 Experiment-1: Causal Intervention
+
+### Objective
+
+Test whether query magnitude functions as a **causal control signal** regulating attention sharpness.
+
+### Implementation Status
+
+- [x] **`src/intervention.py`** — InterventionProfiler class
+  - Scales Q vector for single (layer, head) pair
+  - Intervention after Q projection, before RoPE
+  - Isolation verification test included
+- [x] **`scripts/run_intervention.py`** — Main experiment script
+  - Accepts target layer, head, and scale factors
+  - Runs intervention sweep [0.5, 0.75, 1.0, 1.25, 1.5]
+  - Computes entropy, max_attn, k_eff per scale
+  - Saves results to CSV with trend analysis
+- [x] **`scripts/plot_intervention.py`** — Visualization
+  - Entropy vs Scale plot
+  - Max Attention vs Scale plot
+  - k_eff vs Scale plot
+  - Combined 3-panel figure
+
+### Expected Outcomes
+
+| Metric        | Scale 0.5→1.5 | Expected Effect        |
+| ------------- | ------------- | ---------------------- |
+| Entropy       | —             | Decreasing (strongest) |
+| Max Attention | —             | Increasing             |
+| k_eff         | —             | Decreasing (weakest)   |
+
+### Running the Experiment (SageMaker)
+
+```bash
+# Target head experiment
+python scripts/run_intervention.py --target-layer 12 --target-head 0
+
+# Generate plots
+python scripts/plot_intervention.py --input results/intervention/q_scale_intervention_results.csv
+
+# Control head (for comparison)
+python scripts/run_intervention.py --target-layer 12 --target-head 15 --head-type control
+```
+
+### Results
+
+| Run     | Layer | Head | Type   | Entropy Trend | Max Attn Trend | k_eff Trend |
+| ------- | ----- | ---- | ------ | ------------- | -------------- | ----------- |
+| Pending | 12    | 0    | target | —             | —              | —           |

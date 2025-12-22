@@ -77,5 +77,36 @@ class ExperimentConfig:
         print("=" * 50)
 
 
-# Default configuration
+@dataclass
+class InterventionConfig:
+    """Configuration for Phase-1 Experiment-1 causal intervention."""
+    
+    # Target head configuration
+    target_layer: int = 12          # Mid-network layer (layers 8-15 recommended)
+    target_head: int = 0            # Default head
+    
+    # Scale factors for intervention sweep
+    scales: list = field(default_factory=lambda: [0.5, 0.75, 1.0, 1.25, 1.5])
+    
+    # Context configuration
+    context_length: int = 512       # Fixed for experiment
+    
+    # Metric thresholds
+    keff_threshold: float = 0.9     # 90% mass threshold for effective span
+    ignore_first_n_tokens: int = 2  # Skip early tokens (insufficient context)
+    
+    # Experiment settings
+    seed: int = 42
+    
+    def __post_init__(self):
+        """Validate configuration."""
+        if not (0 <= self.target_layer < 32):
+            raise ValueError(f"target_layer must be in [0, 31], got {self.target_layer}")
+        if not (0 <= self.target_head < 32):
+            raise ValueError(f"target_head must be in [0, 31], got {self.target_head}")
+        if not all(s > 0 for s in self.scales):
+            raise ValueError("All scale factors must be positive")
+
+
+# Default configurations
 DEFAULT_CONFIG = ExperimentConfig()
