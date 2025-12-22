@@ -34,6 +34,30 @@ class AttentionProfiler:
     
     This class uses forward hooks to intercept internal tensors during
     the forward pass without modifying model outputs.
+    
+    IMPORTANT: Pre-RoPE Analysis
+    ============================
+    This profiler captures Q and K vectors BEFORE Rotary Position Embedding
+    (RoPE) is applied. The attention probabilities computed here use:
+    
+        attention = softmax(Q @ K^T / sqrt(d))
+    
+    NOT the model's actual:
+    
+        attention = softmax(RoPE(Q) @ RoPE(K)^T / sqrt(d))
+    
+    Implications:
+    - Query norms (‖Q‖) are measured in the pre-rotational space
+    - Attention entropy reflects pre-rotational attention patterns
+    - This is a deliberate choice for Phase 1: we analyze the INTRINSIC
+      geometry of query vectors before positional encoding
+    
+    This is valid because:
+    1. RoPE preserves vector norms (it's a rotation)
+    2. We're testing whether Q magnitude predicts attention diffusion
+    3. The pre-RoPE space is position-agnostic, which may be desirable
+    
+    For Phase 2, consider comparing pre-RoPE vs post-RoPE correlations.
     """
     
     def __init__(self, model):
