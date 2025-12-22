@@ -132,10 +132,25 @@ class AttentionProfiler:
         """
         Compute attention probabilities from Q and K.
         
-        Note: This uses the RAW Q and K (before RoPE), so the attention
-        pattern may differ slightly from the actual model. For our
-        correlation study, this is acceptable since we're measuring
-        the relationship between Q norm and entropy, not exact attention.
+        IMPORTANT: Recomputation vs Capture
+        ====================================
+        We RECOMPUTE attention here rather than capturing internal model attention.
+        
+        Why not capture directly?
+        - HuggingFace's LlamaAttention uses FlashAttention/SDPA by default
+        - These optimized kernels don't expose intermediate attention weights
+        - Enabling output_attentions=True disables these optimizations
+        
+        Implications of recomputation:
+        - No dropout (model uses dropout=0.0 for inference anyway)
+        - Standard softmax (matches model behavior)
+        - Pre-RoPE attention (see class docstring)
+        - May have minor numerical differences from optimized kernels
+        
+        For Phase 1 correlation study, this is acceptable because:
+        1. We're measuring relative relationships (correlation), not exact values
+        2. The Q norms are from the same pre-RoPE space as our attention
+        3. Consistency between Q and attention computation is maintained
         
         Args:
             Q: [batch, n_heads, seq, head_dim]
