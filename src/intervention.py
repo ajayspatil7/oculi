@@ -492,6 +492,131 @@ def verify_intervention_isolation(
     return passed
 
 
+def run_baseline_sanity_check(
+    model,
+    input_ids: torch.Tensor,
+    target_layer: int,
+    target_head: int,
+    tolerance: float = 1e-4
+) -> Tuple[bool, Dict]:
+    """
+    🔴 CRITICAL SANITY CHECK: Verify no-intervention ≈ scale=1.0
+    
+    This proves the intervention hook is not accidentally perturbing results.
+    We compare:
+    - baseline_run: Forward pass WITHOUT any intervention hook
+    - scale_1_run: Forward pass WITH hook but scale=1.0
+    
+    If these don't match, the hook itself is causing artifacts.
+    
+    Args:
+        model: HuggingFace model
+        input_ids: Test input
+        target_layer: Layer to test
+        target_head: Head to test  
+        tolerance: Maximum allowed difference (default: 1e-4)
+        
+    Returns:
+        Tuple of (passed: bool, metrics_comparison: dict)
+    """
+    print("\n" + "=" * 70)
+    print("🔴 BASELINE SANITY CHECK")
+    print("=" * 70)
+    print("Verifying: no-intervention run ≈ scale=1.0 run")
+    print("This proves the hook does not accidentally perturb results.")
+    print("=" * 70)
+    
+    # === RUN 1: No intervention at all ===
+    print("\n[1/2] Running baseline (no hooks)...")
+    
+    # Import the original profiler for clean baseline
+    from src.hooks import AttentionProfiler as OriginalProfiler
+    
+    original_profiler = OriginalProfiler(model)
+    original_data = original_profiler.profile(input_ids, compute_attn_probs=True)
+    
+    # Get metrics for target layer/head
+    baseline_attn = original_data[target_layer].attn_probs[:, target_head:target_head+1, :, :]
+    baseline_entropy = compute_attention_entropy(baseline_attn, ignore_first_n=2)
+    baseline_max_attn = compute_max_attention_weight(baseline_attn)
+    baseline_k_eff = compute_effective_attention_span(baseline_attn)
+    
+    # Aggregate
+    baseline_entropy_np = baseline_entropy.squeeze().cpu().numpy()
+    baseline_max_attn_np = baseline_max_attn.squeeze().cpu().numpy()
+    baseline_k_eff_np = baseline_k_eff.squeeze().cpu().numpy()
+    
+    valid_mask = ~np.isnan(baseline_entropy_np)
+    baseline_mean_entropy = float(np.mean(baseline_entropy_np[valid_mask]))
+    baseline_mean_max_attn = float(np.mean(baseline_max_attn_np[valid_mask]))
+    baseline_mean_k_eff = float(np.mean(baseline_k_eff_np[valid_mask]))
+    
+    print(f"  Baseline entropy: {baseline_mean_entropy:.6f}")
+    print(f"  Baseline max_attn: {baseline_mean_max_attn:.6f}")
+    print(f"  Baseline k_eff: {baseline_mean_k_eff:.4f}")
+    
+    # === RUN 2: With intervention hook at scale=1.0 ===
+    print("\n[2/2] Running with intervention hook (scale=1.0)...")
+    
+    intervention_profiler = InterventionProfiler(model, target_layer, target_head)
+    scale_1_result = intervention_profiler.run_single_intervention(input_ids, scale=1.0)
+    
+    print(f"  Scale=1.0 entropy: {scale_1_result.mean_entropy:.6f}")
+    print(f"  Scale=1.0 max_attn: {scale_1_result.mean_max_attn:.6f}")
+    print(f"  Scale=1.0 k_eff: {scale_1_result.mean_k_eff:.4f}")
+    
+    # === COMPARE ===
+    print("\n--- Comparison ---")
+    
+    entropy_diff = abs(baseline_mean_entropy - scale_1_result.mean_entropy)
+    max_attn_diff = abs(baseline_mean_max_attn - scale_1_result.mean_max_attn)
+    k_eff_diff = abs(baseline_mean_k_eff - scale_1_result.mean_k_eff)
+    
+    print(f"  Entropy diff: {entropy_diff:.2e} (tolerance: {tolerance})")
+    print(f"  Max attn diff: {max_attn_diff:.2e} (tolerance: {tolerance})")
+    print(f"  k_eff diff: {k_eff_diff:.2e} (tolerance: {tolerance})")
+    
+    # All differences must be within tolerance
+    entropy_ok = entropy_diff < tolerance
+    max_attn_ok = max_attn_diff < tolerance
+    k_eff_ok = k_eff_diff < tolerance
+    
+    passed = entropy_ok and max_attn_ok and k_eff_ok
+    
+    print(f"\n  Entropy: {'✅' if entropy_ok else '❌'}")
+    print(f"  Max Attn: {'✅' if max_attn_ok else '❌'}")
+    print(f"  k_eff: {'✅' if k_eff_ok else '❌'}")
+    
+    print(f"\n{'✅ PASSED' if passed else '❌ FAILED'}: Baseline sanity check")
+    
+    if passed:
+        print("  → Hook is NOT perturbing results accidentally.")
+    else:
+        print("  → WARNING: Hook may be introducing artifacts!")
+        print("  → Results may be unreliable. Investigate before proceeding.")
+    
+    print("=" * 70)
+    
+    comparison = {
+        'baseline_entropy': baseline_mean_entropy,
+        'baseline_max_attn': baseline_mean_max_attn,
+        'baseline_k_eff': baseline_mean_k_eff,
+        'scale_1_entropy': scale_1_result.mean_entropy,
+        'scale_1_max_attn': scale_1_result.mean_max_attn,
+        'scale_1_k_eff': scale_1_result.mean_k_eff,
+        'entropy_diff': entropy_diff,
+        'max_attn_diff': max_attn_diff,
+        'k_eff_diff': k_eff_diff,
+        'tolerance': tolerance,
+        'passed': passed
+    }
+    
+    # Clear memory
+    torch.cuda.empty_cache()
+    
+    return passed, comparison
+
+
 if __name__ == "__main__":
     # Test the intervention profiler
     from transformers import AutoModelForCausalLM, AutoTokenizer

@@ -254,3 +254,34 @@ python scripts/run_intervention.py --target-layer 12 --target-head 15 --head-typ
 | Run     | Layer | Head | Type   | Entropy Trend | Max Attn Trend | k_eff Trend |
 | ------- | ----- | ---- | ------ | ------------- | -------------- | ----------- |
 | Pending | 12    | 0    | target | —             | —              | —           |
+
+---
+
+### 🔴 Failure Criteria (Intellectual Honesty)
+
+> **If the target head does not exhibit monotonic trends while the control head remains flat, the Phase-0 correlation is likely epiphenomenal.**
+
+This means:
+
+- The observed correlation between Q norm and entropy in Phase-0 was **coincidental**
+- Q magnitude is **not** a causal control signal for this head
+- The experiment honestly reports a null result
+
+### 🔴 Validation Requirements (Non-Negotiable)
+
+Before trusting results, verify:
+
+1. **Baseline Sanity Check** — `no_intervention ≈ scale=1.0`
+
+   - If these differ, the hook is introducing artifacts
+   - Run: `run_baseline_sanity_check()` returns `True`
+
+2. **Intervention Isolation** — Only target head Q is scaled
+
+   - Other heads' Q unchanged
+   - K, V vectors unchanged
+   - Run: `verify_intervention_isolation()` returns `True`
+
+3. **Directional Expectations Logged**
+   - Script must print expected trends before running sweep
+   - Forces explicit confrontation of unexpected behavior

@@ -45,7 +45,8 @@ from src.data_loader import load_long_context, load_from_shards
 from src.intervention import (
     InterventionProfiler, 
     InterventionConfig,
-    verify_intervention_isolation
+    verify_intervention_isolation,
+    run_baseline_sanity_check
 )
 
 
@@ -244,6 +245,36 @@ def run_experiment(args):
         if not passed:
             print("\n⚠️ WARNING: Intervention isolation test failed!")
             print("Results may be unreliable.")
+    
+    # 🔴 ADDITION 1: Baseline sanity check
+    print("\n" + "=" * 70)
+    print("BASELINE SANITY CHECK")
+    print("=" * 70)
+    sanity_passed, sanity_comparison = run_baseline_sanity_check(
+        model, input_ids,
+        target_layer=args.target_layer,
+        target_head=args.target_head
+    )
+    if not sanity_passed:
+        print("\n⚠️ CRITICAL WARNING: Baseline sanity check failed!")
+        print("Hook may be introducing artifacts. Results are unreliable.")
+        print("Proceeding anyway for diagnostic purposes...")
+    
+    # 🔴 ADDITION 2: Explicit directional expectations
+    print("\n" + "=" * 70)
+    print("DIRECTIONAL EXPECTATIONS (HYPOTHESIS)")
+    print("=" * 70)
+    print("\nIf query magnitude is a causal control signal, then:")
+    print("")
+    print("  As scale ↑ (0.5 → 1.5):")
+    print("    • entropy  → ↓ DECREASING  (sharper attention)")
+    print("    • max_attn → ↑ INCREASING  (more confident)")
+    print("    • k_eff    → ↓ DECREASING  (fewer keys needed)")
+    print("")
+    print("Failure to observe these trends suggests:")
+    print("  → Phase-0 correlation may be epiphenomenal")
+    print("  → This head may not use Q norm as control signal")
+    print("=" * 70)
     
     # Create profiler and run sweep
     print("\n" + "=" * 70)
