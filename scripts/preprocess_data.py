@@ -63,7 +63,7 @@ ALLOWED_SOURCES = {
 
 # Dataset configuration
 DATASET_NAME = "DKYoon/SlimPajama-6B"
-DATASET_SPLIT = "validation"     # Use validation split as requested
+DATASET_SPLIT = "test"     # SlimPajama-6B only has train/test splits (no validation)
 
 # ============================================================================
 # PREPROCESSING FUNCTIONS
@@ -97,6 +97,7 @@ def stream_dataset() -> Iterator[Dict]:
     - Resume-friendly
     
     Note: Uses huggingface_hub directly to avoid datasets glob pattern issues.
+    SlimPajama-6B structure: data/{split}-*.parquet
     """
     from huggingface_hub import HfFileSystem
     import pyarrow.parquet as pq
@@ -107,42 +108,40 @@ def stream_dataset() -> Iterator[Dict]:
     # Initialize HF filesystem
     fs = HfFileSystem()
     
-    # List parquet files for the validation split
+    # SlimPajama-6B stores files in data/ directory with naming: {split}-{shard}-of-{total}-{hash}.parquet
     repo_path = f"datasets/{DATASET_NAME}"
+    data_path = f"{repo_path}/data"
     
-    # Get validation parquet files
+    # Get parquet files for the requested split
     try:
-        # Try to find validation parquet files
-        files = fs.ls(f"{repo_path}/validation", detail=False)
-        parquet_files = [f for f in files if f.endswith('.parquet')]
-    except Exception:
-        # Fallback: list all files and filter
-        try:
-            all_files = fs.ls(repo_path, detail=False)
-            parquet_files = [f for f in all_files if 'validation' in f and f.endswith('.parquet')]
-        except Exception as e:
-            print(f"Error listing files: {e}")
-            print("Falling back to datasets library with explicit data_files...")
-            
-            # Ultimate fallback: use datasets with explicit parquet URL
-            from datasets import load_dataset
-            dataset = load_dataset(
-                "parquet",
-                data_files={"validation": f"hf://datasets/{DATASET_NAME}/validation/*.parquet"},
-                split="validation",
-                streaming=True
-            )
-            return iter(dataset)
+        files = fs.ls(data_path, detail=False)
+        # Filter for the requested split (test or train)
+        parquet_files = [f for f in files if f.endswith('.parquet') and f"/{DATASET_SPLIT}-" in f]
+    except Exception as e:
+        print(f"Error listing files: {e}")
+        print("Falling back to datasets library...")
+        
+        # Ultimate fallback: use datasets with explicit parquet URL
+        from datasets import load_dataset
+        dataset = load_dataset(
+            "parquet",
+            data_files={DATASET_SPLIT: f"hf://datasets/{DATASET_NAME}/data/{DATASET_SPLIT}-*.parquet"},
+            split=DATASET_SPLIT,
+            streaming=True
+        )
+        return iter(dataset)
     
     if not parquet_files:
-        raise RuntimeError(f"No parquet files found for {DATASET_NAME} validation split")
+        raise RuntimeError(f"No parquet files found for {DATASET_NAME} {DATASET_SPLIT} split")
     
-    print(f"Found {len(parquet_files)} parquet files")
+    parquet_files = sorted(parquet_files)  # Ensure consistent order
+    print(f"Found {len(parquet_files)} parquet files for {DATASET_SPLIT} split")
     
     # Generator to yield samples from parquet files
     def generate_samples():
         for parquet_file in parquet_files:
             try:
+                print(f"Reading: {parquet_file.split('/')[-1]}")
                 # Open and read parquet file in streaming fashion
                 with fs.open(parquet_file, 'rb') as f:
                     table = pq.read_table(f)
