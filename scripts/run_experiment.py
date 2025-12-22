@@ -219,6 +219,7 @@ def run_experiment(args):
             pearson_p=mean_pearson_p,
             spearman_r=mean_spearman_r,
             spearman_p=mean_spearman_p,
+            n_samples=len(samples)  # Total number of samples processed
         ))
     
     print(f"Aggregated results from {len(samples)} samples")
