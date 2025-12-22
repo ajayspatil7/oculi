@@ -1,23 +1,23 @@
 """
-Phase 1 Main Experiment: Query Norm → Attention Entropy Correlation
-====================================================================
+Attention Metrics Data Capture Script
+======================================
 
-This script runs the complete Phase 1 experiment:
-1. Load model and prepare long-context input
-2. Profile all attention layers
-3. Compute query norms and attention entropy
-4. Calculate correlations per (layer, head)
-5. Run randomization control
-6. Save results
+This script captures detailed per-token attention metrics from Llama-3-8B.
+
+For each (sample, layer, head, token), captures:
+- Query L2 norm
+- Attention entropy
+- Max attention weight
+- Effective attention span
+- Token position, layer, head IDs
+
+Saves all metrics to CSV (no correlation analysis).
 
 Usage:
-    python scripts/run_experiment.py --context-length 4096
-    python scripts/run_experiment.py --context-length 2048 --skip-control
+    python scripts/run_experiment.py --context-length 512 --n-samples 50
 """
 
 import argparse
-import json
-import pickle
 import time
 from datetime import datetime
 from pathlib import Path
@@ -25,42 +25,34 @@ from pathlib import Path
 import torch
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # Add parent to path for imports
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.config import ExperimentConfig
 from src.data_loader import load_long_context, load_from_shards
 from src.hooks import AttentionProfiler
 from src.metrics import (
-    compute_query_norm,
     compute_attention_entropy,
-    compute_correlations,
-    run_randomization_control,
-    results_to_dataframe,
-    results_to_heatmap_matrix,
-    print_summary,
+    compute_max_attention_weight,
+    compute_effective_attention_span,
 )
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Phase 1: Query Norm → Entropy Correlation")
+    parser = argparse.ArgumentParser(description="Capture Attention Metrics to CSV")
     parser.add_argument("--model", type=str, default="meta-llama/Meta-Llama-3-8B",
                         help="Model name or path")
-    parser.add_argument("--context-length", type=int, default=4096,
+    parser.add_argument("--context-length", type=int, default=512,
                         help="Context length in tokens")
     parser.add_argument("--n-samples", type=int, default=1,
                         help="Number of samples to process")
     parser.add_argument("--data-dir", type=str, default="data/processed",
                         help="Directory containing preprocessed shards")
     parser.add_argument("--output-dir", type=str, default="results",
-                        help="Output directory for results")
-    parser.add_argument("--skip-control", action="store_true",
-                        help="Skip randomization control (faster)")
-    parser.add_argument("--n-permutations", type=int, default=100,
-                        help="Number of permutations for randomization control")
+                        help="Output directory for CSV")
     parser.add_argument("--seed", type=int, default=42,
                         help="Random seed")
     return parser.parse_args()
@@ -99,8 +91,71 @@ def load_model(model_name: str):
     return model, tokenizer
 
 
+def collect_metrics_for_sample(
+    profiler: AttentionProfiler,
+    input_ids: torch.Tensor,
+    sample_id: int
+) -> pd.DataFrame:
+    """
+    Collect all metrics for a single sample.
+    
+    Returns DataFrame with one row per (layer, head, token).
+    """
+    # Profile attention
+    layer_data = profiler.profile(input_ids, compute_attn_probs=True)
+    
+    # Get dimensions
+    n_layers = profiler.n_layers
+    n_heads = profiler.n_heads
+    seq_len = input_ids.shape[1]
+    
+    # Collect all metrics
+    rows = []
+    
+    for layer_idx in range(n_layers):
+        data = layer_data[layer_idx]
+        
+        # Compute metrics for this layer
+        Q = data.query  # [1, n_heads, seq_len, head_dim]
+        attn_probs = data.attn_probs  # [1, n_heads, seq_len, seq_len]
+        
+        # Query norms: [1, n_heads, seq_len]
+        q_norms = torch.norm(Q, p=2, dim=-1)
+        
+        # Attention entropy: [1, n_heads, seq_len]
+        entropy = compute_attention_entropy(attn_probs)
+        
+        # Max attention weight: [1, n_heads, seq_len]
+        max_attn = compute_max_attention_weight(attn_probs)
+        
+        # Effective span: [1, n_heads, seq_len]
+        k_eff = compute_effective_attention_span(attn_probs, threshold=0.9)
+        
+        # Convert to numpy and squeeze batch dimension
+        q_norms = q_norms.squeeze(0).cpu().numpy()  # [n_heads, seq_len]
+        entropy = entropy.squeeze(0).cpu().numpy()
+        max_attn = max_attn.squeeze(0).cpu().numpy()
+        k_eff = k_eff.squeeze(0).cpu().numpy()
+        
+        # Create rows for each (head, token) combination
+        for head_idx in range(n_heads):
+            for token_idx in range(seq_len):
+                rows.append({
+                    'sample_id': sample_id,
+                    'layer': layer_idx,
+                    'head': head_idx,
+                    'token_pos': token_idx,
+                    'query_norm': q_norms[head_idx, token_idx],
+                    'entropy': entropy[head_idx, token_idx],
+                    'max_attn': max_attn[head_idx, token_idx],
+                    'k_eff': k_eff[head_idx, token_idx],
+                })
+    
+    return pd.DataFrame(rows)
+
+
 def run_experiment(args):
-    """Run the complete Phase 1 experiment."""
+    """Run the metrics capture experiment."""
     
     # Setup
     torch.manual_seed(args.seed)
@@ -110,14 +165,15 @@ def run_experiment(args):
     output_dir.mkdir(parents=True, exist_ok=True)
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    csv_path = output_dir / f"attention_metrics_{timestamp}.csv"
     
     print("\n" + "=" * 60)
-    print("PHASE 1 EXPERIMENT: Query Norm → Attention Entropy")
+    print("ATTENTION METRICS CAPTURE")
     print("=" * 60)
     print(f"Timestamp: {timestamp}")
     print(f"Context length: {args.context_length}")
     print(f"Number of samples: {args.n_samples}")
-    print(f"Output directory: {output_dir}")
+    print(f"Output CSV: {csv_path}")
     
     # Check GPU
     print_gpu_info()
@@ -134,7 +190,6 @@ def run_experiment(args):
     # Prepare input data
     print(f"\nPreparing input data...")
     
-    # Try to load from shards if n_samples > 1
     if args.n_samples > 1:
         samples = load_from_shards(
             data_dir=args.data_dir,
@@ -149,230 +204,70 @@ def run_experiment(args):
     
     print(f"Processing {len(samples)} samples...")
     
-    # Aggregate results across all samples
-    all_results = []
-    profile_times = []
+    # Expected rows
+    n_layers = model.config.num_hidden_layers
+    n_heads = model.config.num_attention_heads
+    seq_len = args.context_length
+    total_rows = len(samples) * n_layers * n_heads * seq_len
+    print(f"Expected CSV rows: {total_rows:,}")
     
-    # Profile attention for each sample
-    for sample_idx, inputs in enumerate(samples):
-        print(f"\n{'='*60}")
-        print(f"Sample {sample_idx + 1}/{len(samples)}")
-        print(f"{'='*60}")
+    # Process samples and save incrementally
+    first_write = True
+    total_time = 0
+    
+    for sample_idx, inputs in enumerate(tqdm(samples, desc="Processing samples")):
+        sample_start = time.time()
         
-        input_ids = inputs["input_ids"]
-        seq_len = input_ids.shape[1]
-        print(f"Sequence length: {seq_len}")
-        
-        # Profile attention
+        # Create profiler for this sample
         profiler = AttentionProfiler(model)
         
-        profile_start = time.time()
-        layer_data = profiler.profile(input_ids, compute_attn_probs=True)
-        profile_time = time.time() - profile_start
-        profile_times.append(profile_time)
-        print(f"Profiling time: {profile_time:.1f}s")
+        # Collect metrics
+        df = collect_metrics_for_sample(profiler, inputs["input_ids"], sample_idx)
         
-        # Get metrics
-        q_norms = profiler.get_all_query_norms()
-        entropy = profiler.get_all_attention_entropy()
-        
-        # Compute correlations for this sample
-        sample_results = compute_correlations(q_norms, entropy, verbose=False)
-        all_results.append(sample_results)
-        
-        # Clear CUDA cache to prevent OOM
-        torch.cuda.empty_cache()
-    
-    # Aggregate correlations across samples
-    print(f"\n{'='*60}")
-    print("AGGREGATING RESULTS ACROSS SAMPLES")
-    print(f"{'='*60}")
-    
-    # Combine all results
-    from collections import defaultdict
-    aggregated = defaultdict(list)
-    
-    for sample_results in all_results:
-        for result in sample_results:
-            key = (result.layer, result.head)
-            aggregated[key].append({
-                'pearson_r': result.pearson_r,
-                'pearson_p': result.pearson_p,
-                'spearman_r': result.spearman_r,
-                'spearman_p': result.spearman_p,
-            })
-    
-    # Compute mean correlations per (layer, head)
-    from src.metrics import CorrelationResult
-    results = []
-    
-    for (layer, head), sample_corrs in aggregated.items():
-        mean_pearson_r = np.mean([s['pearson_r'] for s in sample_corrs])
-        mean_pearson_p = np.mean([s['pearson_p'] for s in sample_corrs])
-        mean_spearman_r = np.mean([s['spearman_r'] for s in sample_corrs])
-        mean_spearman_p = np.mean([s['spearman_p'] for s in sample_corrs])
-        
-        results.append(CorrelationResult(
-            layer=layer,
-            head=head,
-            pearson_r=mean_pearson_r,
-            pearson_p=mean_pearson_p,
-            spearman_r=mean_spearman_r,
-            spearman_p=mean_spearman_p,
-            n_samples=len(samples)  # Total number of samples processed
-        ))
-    
-    print(f"Aggregated results from {len(samples)} samples")
-    print(f"Mean profiling time: {np.mean(profile_times):.1f}s")
-    
-    # Print summary
-    print_summary(results)
-    
-    profile_time = np.mean(profile_times)
-    correlation_time = 0  # Already computed in aggregation
-    
-    # Randomization control
-    null_dist = None
-    if not args.skip_control:
-        print("\nRunning randomization control...")
-        control_start = time.time()
-        null_dist = run_randomization_control(
-            q_norms, entropy, 
-            n_permutations=args.n_permutations,
-            seed=args.seed
-        )
-        control_time = time.time() - control_start
-        print(f"Control experiment time: {control_time:.1f}s")
-    
-    # Save results
-    print("\nSaving results...")
-    
-    # 1. Correlation DataFrame
-    df = results_to_dataframe(results)
-    csv_path = output_dir / f"correlations_{timestamp}.csv"
-    df.to_csv(csv_path, index=False)
-    print(f"  Saved: {csv_path}")
-    
-    # 2. Heatmap matrices
-    pearson_matrix = results_to_heatmap_matrix(
-        results, model.config.num_hidden_layers, model.config.num_attention_heads, 'pearson_r'
-    )
-    spearman_matrix = results_to_heatmap_matrix(
-        results, model.config.num_hidden_layers, model.config.num_attention_heads, 'spearman_r'
-    )
-    
-    matrices_path = output_dir / f"heatmap_matrices_{timestamp}.npz"
-    np.savez(matrices_path, pearson=pearson_matrix, spearman=spearman_matrix)
-    print(f"  Saved: {matrices_path}")
-    
-    # 3. Raw data (for further analysis)
-    raw_data = {
-        'q_norms': q_norms.cpu().numpy(),
-        'entropy': entropy.cpu().numpy(),
-        'timestamp': timestamp,
-        'config': {
-            'model': args.model,
-            'context_length': args.context_length,
-            'n_layers': model.config.num_hidden_layers,
-            'n_heads': model.config.num_attention_heads,
-        }
-    }
-    raw_path = output_dir / f"raw_data_{timestamp}.pkl"
-    with open(raw_path, 'wb') as f:
-        pickle.dump(raw_data, f)
-    print(f"  Saved: {raw_path}")
-    
-    # 4. Summary JSON
-    summary = {
-        'timestamp': timestamp,
-        'model': args.model,
-        'context_length': args.context_length,
-        'n_samples': len(samples),
-        'n_layers': model.config.num_hidden_layers,
-        'n_heads': model.config.num_attention_heads,
-        'total_pairs': len(results),
-        'significant_pairs': sum(1 for r in results if r.is_significant()),
-        'mean_pearson_r': float(df['pearson_r'].mean()),
-        'std_pearson_r': float(df['pearson_r'].std()),
-        'min_pearson_r': float(df['pearson_r'].min()),
-        'max_pearson_r': float(df['pearson_r'].max()),
-        'mean_abs_pearson_r': float(df['pearson_r'].abs().mean()),
-        'times': {
-            'model_load': load_time,
-            'profiling': profile_time,
-            'correlation': correlation_time,
-        }
-    }
-    
-    if null_dist:
-        # Convert numpy types to Python types for JSON serialization
-        summary['randomization_control'] = {
-            k: float(v) if hasattr(v, 'item') else v 
-            for k, v in null_dist.items()
-        }
-        summary['times']['control'] = control_time
-    
-    summary_path = output_dir / f"summary_{timestamp}.json"
-    with open(summary_path, 'w') as f:
-        json.dump(summary, f, indent=2)
-    print(f"  Saved: {summary_path}")
-    
-    # Final report
-    print("\n" + "=" * 60)
-    print("EXPERIMENT COMPLETE")
-    print("=" * 60)
-    
-    sig_count = sum(1 for r in results if r.is_significant())
-    total = len(results)
-    sig_pct = 100 * sig_count / total
-    
-    print(f"\nKey Results:")
-    print(f"  Significant correlations: {sig_count}/{total} ({sig_pct:.1f}%)")
-    print(f"  Mean |r|: {df['pearson_r'].abs().mean():.4f}")
-    print(f"  Max |r|:  {df['pearson_r'].abs().max():.4f}")
-    
-    if null_dist:
-        print(f"\nRandomization Control:")
-        print(f"  Shuffled mean |r|: {null_dist['abs_mean_shuffled_r']:.4f}")
-        
-        # Check if control passed
-        if null_dist['abs_mean_shuffled_r'] < 0.1:
-            print("  ✅ Control PASSED (shuffled r → ~0)")
+        # Save to CSV (append mode after first write)
+        if first_write:
+            df.to_csv(csv_path, index=False, mode='w')
+            first_write = False
         else:
-            print("  ⚠️  Control may have issues")
+            df.to_csv(csv_path, index=False, mode='a', header=False)
+        
+        sample_time = time.time() - sample_start
+        total_time += sample_time
+        
+        # Clear CUDA cache
+        torch.cuda.empty_cache()
+        
+        # Progress update
+        if (sample_idx + 1) % 10 == 0:
+            avg_time = total_time / (sample_idx + 1)
+            remaining = (len(samples) - sample_idx - 1) * avg_time
+            print(f"  [{sample_idx + 1}/{len(samples)}] "
+                  f"Avg: {avg_time:.1f}s/sample, "
+                  f"Remaining: {remaining/60:.1f}min")
     
-    # Go/No-Go decision
-    print("\n" + "-" * 60)
-    print("PHASE 1 DECISION")
-    print("-" * 60)
-    
-    # Criteria: |r| >= 0.5 in >= 20% of heads, control passed
-    threshold_pct = 20
-    control_passed = null_dist is None or null_dist['abs_mean_shuffled_r'] < 0.1
-    
-    if sig_pct >= threshold_pct and control_passed:
-        print(f"✅ GO: {sig_pct:.1f}% of heads show significant correlation (threshold: {threshold_pct}%)")
-        decision = "GO"
-    elif sig_pct >= 10:
-        print(f"⚠️  MARGINAL: {sig_pct:.1f}% of heads show significant correlation")
-        print("   Consider examining which layers/heads have strong correlations")
-        decision = "MARGINAL"
-    else:
-        print(f"❌ NO-GO: Only {sig_pct:.1f}% of heads show significant correlation")
-        decision = "NO-GO"
-    
-    summary['decision'] = decision
-    
-    # Update summary with decision
-    with open(summary_path, 'w') as f:
-        json.dump(summary, f, indent=2)
-    
+    # Final summary
+    print("\n" + "=" * 60)
+    print("CAPTURE COMPLETE")
     print("=" * 60)
-    print(f"\nResults saved to: {output_dir}")
+    print(f"Total samples: {len(samples)}")
+    print(f"Total time: {total_time:.1f}s ({total_time/60:.1f}min)")
+    print(f"Average time per sample: {total_time/len(samples):.1f}s")
+    print(f"Output CSV: {csv_path}")
+    print(f"File size: {csv_path.stat().st_size / 1e9:.2f} GB")
     
-    return summary
+    # Read and validate
+    print("\nValidating CSV...")
+    df_final = pd.read_csv(csv_path)
+    print(f"Total rows: {len(df_final):,}")
+    print(f"Columns: {list(df_final.columns)}")
+    print(f"\nFirst few rows:")
+    print(df_final.head(10))
+    
+    print("\n✅ Experiment complete!")
+    
+    return csv_path
 
 
 if __name__ == "__main__":
     args = parse_args()
-    summary = run_experiment(args)
+    csv_path = run_experiment(args)

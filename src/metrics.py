@@ -116,6 +116,115 @@ def compute_attention_entropy(
     return entropy
 
 
+def compute_max_attention_weight(
+    attn_probs: torch.Tensor,
+    causal_mask: Optional[torch.Tensor] = None
+) -> torch.Tensor:
+    """
+    Compute maximum attention weight per token.
+    
+    For each query token, returns the maximum attention weight it assigns
+    to any key token in the valid attention range.
+    
+    Args:
+        attn_probs: [batch, n_heads, seq_len, seq_len] attention probabilities
+        causal_mask: Optional [seq_len, seq_len] mask (True = masked)
+        
+    Returns:
+        max_weights: [batch, n_heads, seq_len]
+    """
+    attn_probs = attn_probs.float()
+    
+    # Get dimensions
+    if attn_probs.dim() == 4:
+        batch, n_heads, seq_len, _ = attn_probs.shape
+    else:
+        n_heads, seq_len, _ = attn_probs.shape
+        batch = None
+    
+    # Build causal mask if not provided
+    if causal_mask is None:
+        causal_mask = torch.triu(
+            torch.ones(seq_len, seq_len, device=attn_probs.device),
+            diagonal=1
+        ).bool()
+    
+    # Valid mask: True where attention is allowed
+    valid_mask = ~causal_mask
+    if batch is not None:
+        valid_mask = valid_mask.unsqueeze(0).unsqueeze(0)
+    else:
+        valid_mask = valid_mask.unsqueeze(0)
+    
+    # Mask out invalid positions with -inf to ignore in max
+    masked_probs = attn_probs.clone()
+    masked_probs[~valid_mask] = 0.0
+    
+    # Get max along key dimension
+    max_weights = torch.max(masked_probs, dim=-1).values
+    
+    return max_weights
+
+
+def compute_effective_attention_span(
+    attn_probs: torch.Tensor,
+    causal_mask: Optional[torch.Tensor] = None,
+    threshold: float = 0.9
+) -> torch.Tensor:
+    """
+    Compute effective attention span (k_eff).
+    
+    Returns the minimum number of top-weighted keys needed to account
+    for 'threshold' fraction (default 90%) of total attention mass.
+    
+    Args:
+        attn_probs: [batch, n_heads, seq_len, seq_len] attention probabilities
+        causal_mask: Optional [seq_len, seq_len] mask (True = masked)
+        threshold: Cumulative probability threshold (default 0.9 for 90%)
+        
+    Returns:
+        k_eff: [batch, n_heads, seq_len] effective span
+    """
+    attn_probs = attn_probs.float()
+    
+    # Get dimensions
+    if attn_probs.dim() == 4:
+        batch, n_heads, seq_len, _ = attn_probs.shape
+    else:
+        n_heads, seq_len, _ = attn_probs.shape
+        batch = None
+    
+    # Build causal mask if not provided
+    if causal_mask is None:
+        causal_mask = torch.triu(
+            torch.ones(seq_len, seq_len, device=attn_probs.device),
+            diagonal=1
+        ).bool()
+    
+    # Valid mask
+    valid_mask = ~causal_mask
+    if batch is not None:
+        valid_mask = valid_mask.unsqueeze(0).unsqueeze(0)
+    else:
+        valid_mask = valid_mask.unsqueeze(0)
+    
+    # Zero out masked positions
+    masked_probs = attn_probs * valid_mask
+    
+    # Sort attention weights in descending order
+    sorted_probs, _ = torch.sort(masked_probs, dim=-1, descending=True)
+    
+    # Compute cumulative sum
+    cumsum = torch.cumsum(sorted_probs, dim=-1)
+    
+    # Find first position where cumsum >= threshold
+    # Add 1 because we want count (1-indexed), not index (0-indexed)
+    k_eff = torch.sum(cumsum < threshold, dim=-1) + 1
+    
+    return k_eff.float()
+
+
+
 def compute_correlation_single(
     q_norms: np.ndarray,
     entropy: np.ndarray
