@@ -95,22 +95,67 @@ def stream_dataset() -> Iterator[Dict]:
     - No disk space for full dataset
     - Can stop early
     - Resume-friendly
+    
+    Note: Uses huggingface_hub directly to avoid datasets glob pattern issues.
     """
-    from datasets import load_dataset
+    from huggingface_hub import HfFileSystem
+    import pyarrow.parquet as pq
     
     print(f"Loading dataset: {DATASET_NAME} (split: {DATASET_SPLIT})")
-    print("Using streaming mode...")
+    print("Using HuggingFace Hub streaming...")
     
-    # trust_remote_code=True needed for some dataset configurations
-    # This dataset uses parquet files which require this flag
-    dataset = load_dataset(
-        DATASET_NAME,
-        split=DATASET_SPLIT,
-        streaming=True,
-        trust_remote_code=True
-    )
+    # Initialize HF filesystem
+    fs = HfFileSystem()
     
-    return iter(dataset)
+    # List parquet files for the validation split
+    repo_path = f"datasets/{DATASET_NAME}"
+    
+    # Get validation parquet files
+    try:
+        # Try to find validation parquet files
+        files = fs.ls(f"{repo_path}/validation", detail=False)
+        parquet_files = [f for f in files if f.endswith('.parquet')]
+    except Exception:
+        # Fallback: list all files and filter
+        try:
+            all_files = fs.ls(repo_path, detail=False)
+            parquet_files = [f for f in all_files if 'validation' in f and f.endswith('.parquet')]
+        except Exception as e:
+            print(f"Error listing files: {e}")
+            print("Falling back to datasets library with explicit data_files...")
+            
+            # Ultimate fallback: use datasets with explicit parquet URL
+            from datasets import load_dataset
+            dataset = load_dataset(
+                "parquet",
+                data_files={"validation": f"hf://datasets/{DATASET_NAME}/validation/*.parquet"},
+                split="validation",
+                streaming=True
+            )
+            return iter(dataset)
+    
+    if not parquet_files:
+        raise RuntimeError(f"No parquet files found for {DATASET_NAME} validation split")
+    
+    print(f"Found {len(parquet_files)} parquet files")
+    
+    # Generator to yield samples from parquet files
+    def generate_samples():
+        for parquet_file in parquet_files:
+            try:
+                # Open and read parquet file in streaming fashion
+                with fs.open(parquet_file, 'rb') as f:
+                    table = pq.read_table(f)
+                    
+                    # Convert to pandas and iterate
+                    df = table.to_pandas()
+                    for _, row in df.iterrows():
+                        yield row.to_dict()
+            except Exception as e:
+                print(f"Error reading {parquet_file}: {e}")
+                continue
+    
+    return generate_samples()
 
 
 def is_valid_source(sample: Dict) -> bool:
