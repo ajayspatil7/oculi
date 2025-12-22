@@ -242,13 +242,22 @@ class AttentionProfiler:
         
         return torch.stack(norms)  # [n_layers, n_heads, seq]
     
-    def get_all_attention_entropy(self, eps: float = 1e-9) -> torch.Tensor:
+    def get_all_attention_entropy(self, causal_mask: torch.Tensor = None) -> torch.Tensor:
         """
-        Get attention entropy from all layers.
+        Get attention entropy from all layers using the canonical implementation.
+        
+        Uses compute_attention_entropy from metrics.py to ensure consistency.
+        
+        Args:
+            causal_mask: Optional [seq_len, seq_len] causal mask (True = masked).
+                         If None, will be constructed automatically.
         
         Returns:
             Tensor of shape [n_layers, n_heads, seq_len]
         """
+        # Import here to avoid circular imports
+        from src.metrics import compute_attention_entropy
+        
         if not self.layer_data:
             raise RuntimeError("No data captured. Run profile() first.")
         
@@ -258,11 +267,12 @@ class AttentionProfiler:
             if attn_probs is None:
                 raise RuntimeError(f"No attention probs for layer {layer_idx}")
             
-            # Entropy: H = -sum(p * log(p))
-            # Handle masked positions (prob = 0)
-            attn_probs_safe = attn_probs.float().clamp(min=eps)
-            entropy = -torch.sum(attn_probs_safe * torch.log(attn_probs_safe), dim=-1)
-            entropy = entropy.squeeze(0)  # [n_heads, seq]
+            # Use the single canonical entropy implementation
+            entropy = compute_attention_entropy(
+                attn_probs,
+                causal_mask=causal_mask,
+                ignore_first_n=0  # Don't double-ignore; let caller decide
+            ).squeeze(0)  # [n_heads, seq]
             
             entropies.append(entropy)
         
