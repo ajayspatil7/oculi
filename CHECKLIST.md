@@ -24,37 +24,27 @@
   - Attention entropy computation (mask-aware, NaN-safe)
   - Per-head correlation demo
 
+### Core Implementation
+
+- [x] **Data loader** — `src/data_loader.py` with sample text, file loading, dataset support
+- [x] **Attention hooks** — `src/hooks.py` with `AttentionProfiler` class for all 32 layers
+- [x] **Metrics module** — `src/metrics.py` with query norm, entropy, correlations, randomization control
+- [x] **Main experiment script** — `scripts/run_experiment.py` complete pipeline
+- [x] **Visualization script** — `scripts/visualize.py` with heatmaps, scatter, histograms
+
 ---
 
 ## 🔲 To Do
 
-### Data Preparation
+### Execution
 
-- [ ] **Prepare long-context input** — 4K tokens of diverse text
-- [ ] **Create data loader** — `src/data_loader.py`
-
-### Core Experiment
-
-- [ ] **Implement attention hooks** — `src/hooks.py` to capture Q and attention probs across ALL 32 layers
-- [ ] **Implement metrics module** — `src/metrics.py` with query_norm() and attention_entropy()
-- [ ] **Build main experiment script** — `scripts/run_experiment.py`
-- [ ] **Run full experiment** — Collect (layer, head, token, q_norm, entropy) tuples
-
-### Analysis
-
-- [ ] **Compute correlations** — Pearson + Spearman for each (layer, head) pair
-- [ ] **Run randomization control** — Shuffle entropy, verify correlations → ~0
-- [ ] **Save raw data** — CSV/pickle with all collected metrics
-
-### Visualization
-
-- [ ] **Scatter plots** — ‖Q‖ vs entropy for representative heads
-- [ ] **Correlation heatmap** — Layers × Heads color-coded by r
-- [ ] **Distribution histograms** — Query norm and entropy distributions
+- [ ] **Run full experiment on SageMaker** — `python scripts/run_experiment.py --context-length 4096`
+- [ ] **Generate visualizations** — `python scripts/visualize.py --latest`
+- [ ] **Verify randomization control** — Check shuffled correlations → ~0
 
 ### Deliverables
 
-- [ ] **Write interpretation** — Document findings, layer-by-layer patterns
+- [ ] **Write interpretation** — Document findings in `results/FINDINGS.md`
 - [ ] **Go/No-Go decision** — Based on |r| ≥ 0.5, p < 0.01 criteria
 - [ ] **Final commit** — Tag as `phase1-complete`
 
@@ -71,18 +61,18 @@
 
 ---
 
-## File Structure (Target)
+## File Structure
 
 ```
 Spectra/
 ├── src/
 │   ├── config.py        ✅ Done
-│   ├── hooks.py         🔲 To Do
-│   ├── metrics.py       🔲 To Do
-│   └── data_loader.py   🔲 To Do
+│   ├── hooks.py         ✅ Done
+│   ├── metrics.py       ✅ Done
+│   └── data_loader.py   ✅ Done
 ├── scripts/
-│   ├── run_experiment.py    🔲 To Do
-│   └── visualize.py         🔲 To Do
+│   ├── run_experiment.py    ✅ Done
+│   └── visualize.py         ✅ Done
 ├── notebooks/
 │   └── experiment_zero/
 │       ├── basic_inference.py   ✅ Done
@@ -90,4 +80,21 @@ Spectra/
 ├── results/                     🔲 To Do (experiment outputs)
 ├── CHECKLIST.md                 ✅ This file
 └── README.md                    ✅ Done
+```
+
+---
+
+## Quick Start
+
+```bash
+# On SageMaker, after git pull:
+cd ~/Spectra
+
+# Run the full experiment
+python scripts/run_experiment.py --context-length 4096
+
+# Generate visualizations
+python scripts/visualize.py --latest
+
+# Results will be in results/ directory
 ```
