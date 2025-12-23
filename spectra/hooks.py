@@ -127,7 +127,10 @@ class UnifiedHooks:
             Q[:, target_head, :, :] = Q[:, target_head, :, :] * q_scale
         
         if k_scale != 1.0:
-            kv_head_idx = target_head % self.info.n_kv_heads
+            # CORRECT GQA MAPPING: use division, not modulo
+            # Q heads 0-3 -> KV head 0 (if ratio is 4)
+            q_per_kv = self.info.n_heads // self.info.n_kv_heads
+            kv_head_idx = target_head // q_per_kv
             K[:, kv_head_idx, :, :] = K[:, kv_head_idx, :, :] * k_scale
         
         return Q, K, V
