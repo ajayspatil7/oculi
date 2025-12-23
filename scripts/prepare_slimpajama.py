@@ -31,7 +31,7 @@ def download_slimpajama(cache_dir: Path, max_files: int = 5):
     
     # List files in repo
     print("  Listing repository files...")
-    files = list_repo_files(repo_id=repo_id)
+    files = list_repo_files(repo_id=repo_id, repo_type="dataset")
     parquet_files = [f for f in files if f.endswith('.parquet')]
     
     print(f"  Found {len(parquet_files)} parquet files")
