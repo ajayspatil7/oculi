@@ -182,11 +182,19 @@ def run_pipeline(config: Dict, experiments_to_run: Optional[List[str]] = None):
             # Load data
             input_ids = load_data(config, adapter.tokenizer)
             
-            # Truncate/pad to context length
-            if input_ids.shape[1] > ctx_len:
+            # Context length enforcement
+            actual_len = input_ids.shape[1]
+            
+            if actual_len < ctx_len:
+                print(f"  ⚠️ Sample has only {actual_len} tokens, need {ctx_len}")
+                print(f"  ⚠️ SKIPPING ctx{ctx_len} (insufficient data)")
+                continue
+            
+            # Truncate to exact context length
+            if actual_len > ctx_len:
                 input_ids = input_ids[:, :ctx_len]
             
-            print(f"  Input tokens: {input_ids.shape[1]}")
+            print(f"  Input tokens: {input_ids.shape[1]} (enforced)")
             
             # Create context for experiments
             context = {
