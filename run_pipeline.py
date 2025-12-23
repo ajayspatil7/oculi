@@ -65,7 +65,12 @@ def load_data(config: Dict, tokenizer) -> torch.Tensor:
         return samples[sample_idx]["input_ids"]
     else:
         # Fallback to generated sample
-        ctx_len = config.get("context_lengths", [512])[0]
+        ctx_config = config.get("context_lengths", [512])
+        # Handle dict format {planned: [...], enabled: [...]}
+        if isinstance(ctx_config, dict):
+            ctx_len = ctx_config.get("enabled", [512])[0]
+        else:
+            ctx_len = ctx_config[0] if ctx_config else 512
         sample = load_long_context(tokenizer, target_length=ctx_len)
         return sample["input_ids"]
 
@@ -131,8 +136,12 @@ def run_pipeline(config: Dict, experiments_to_run: Optional[List[str]] = None):
         print("  No enabled models found in config!")
         return
     
-    # Get context lengths
-    context_lengths = config.get("context_lengths", [512])
+    # Get context lengths (handle dict format)
+    ctx_config = config.get("context_lengths", [512])
+    if isinstance(ctx_config, dict):
+        context_lengths = ctx_config.get("enabled", [512])
+    else:
+        context_lengths = ctx_config
     
     # Determine experiments to run
     exp_config = config.get("experiments", {})
