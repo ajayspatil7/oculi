@@ -1,0 +1,4 @@
+head_name,layer,head,expected_gain,q_range,k_range,asymmetry_ratio,interpretation
+high_gain,20,19,0.804,4.624647706747055,0.0,inf,Query-dominant control (Q ≠ K)
+medium_gain,14,8,0.5,1.161768913269043,0.0,inf,Partial Q-dominance (transitional regime)
+low_gain,0,23,0.017,0.31984519958496094,0.0,inf,Unexpected asymmetry in low-gain head
