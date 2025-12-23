@@ -1,0 +1,85 @@
+# Spectra Phase1-M Experiment Configuration
+# ==========================================
+# This is the SINGLE source of truth for all experiments.
+# run_pipeline.py reads this file - no hardcoded values in code.
+
+experiment:
+  name: "Spectra-Phase1-M"
+  description: "Multi-model generalization of query norm → attention control"
+  seed: 42
+
+# Model configurations
+# Add/remove models here to change experiment scope
+models:
+  - name: "meta-llama/Meta-Llama-3-8B"
+    family: "llama"
+    enabled: true
+
+  # Uncomment to add more models:
+  # - name: "meta-llama/Meta-Llama-3-70B"
+  #   family: "llama"
+  #   enabled: true
+  # - name: "mistralai/Mistral-7B-v0.1"
+  #   family: "mistral"
+  #   enabled: false
+
+# Context lengths to test
+context_lengths:
+  - 512
+  # - 1024  # Uncomment for Phase1-M
+  # - 2048  # Uncomment for Phase1-M
+
+# Scaling factors for intervention experiments
+alphas:
+  default: [0.5, 0.75, 1.0, 1.25, 1.5]
+
+# Which experiments to run
+experiments:
+  exp0:
+    enabled: true
+    description: "Observational correlation analysis"
+
+  exp1:
+    enabled: true
+    description: "Causal Q-scaling intervention"
+    target_layer: 12
+    target_head: 0
+
+  exp2b:
+    enabled: true
+    description: "Global gain analysis (all heads)"
+
+  exp3a:
+    enabled: true
+    description: "Q vs K scaling control"
+    # Head selected from exp2b median gain
+
+  exp3b:
+    enabled: true
+    description: "Gain-conditioned Q vs K comparison"
+    high_gain_percentile: 95
+    medium_gain_percentile: 50
+    low_gain_percentile: 5
+
+# Data configuration
+data:
+  source: "preprocessed" # Options: preprocessed, wikipedia, code
+  directory: "data/processed"
+  sample_idx: 0
+
+# Output configuration
+output:
+  base_dir: "results"
+  save_intermediate: true
+  save_plots: true
+
+# Reproducibility
+reproducibility:
+  save_metadata: true
+  save_config_snapshot: true
+  save_git_commit: true
+
+# Logging
+logging:
+  level: "INFO"
+  save_logs: true
