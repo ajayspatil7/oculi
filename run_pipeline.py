@@ -50,28 +50,32 @@ def get_git_commit() -> Optional[str]:
         return None
 
 
-def load_data(config: Dict, tokenizer) -> torch.Tensor:
-    """Load input data based on config."""
+def load_data(config: Dict, tokenizer, ctx_len: int = None) -> torch.Tensor:
+    """Load input data based on config, trying context-specific dirs first."""
     from src.data_loader import load_from_shards, load_long_context
     
     data_config = config.get("data", {})
-    data_dir = data_config.get("directory", "data/processed")
+    base_dir = data_config.get("directory", "data/processed")
     sample_idx = data_config.get("sample_idx", 0)
     
-    # Try preprocessed shards first
-    samples = load_from_shards(data_dir, n_samples=sample_idx + 1, device="cuda")
+    # Try context-specific directory first (e.g., data/ctx1024)
+    if ctx_len:
+        ctx_specific_dir = f"data/ctx{ctx_len}"
+        samples = load_from_shards(ctx_specific_dir, n_samples=sample_idx + 1, device="cuda")
+        if samples and len(samples) > sample_idx:
+            print(f"  Data source: {ctx_specific_dir}")
+            return samples[sample_idx]["input_ids"]
+    
+    # Fallback to default directory
+    samples = load_from_shards(base_dir, n_samples=sample_idx + 1, device="cuda")
     
     if samples and len(samples) > sample_idx:
+        print(f"  Data source: {base_dir}")
         return samples[sample_idx]["input_ids"]
     else:
         # Fallback to generated sample
-        ctx_config = config.get("context_lengths", [512])
-        # Handle dict format {planned: [...], enabled: [...]}
-        if isinstance(ctx_config, dict):
-            ctx_len = ctx_config.get("enabled", [512])[0]
-        else:
-            ctx_len = ctx_config[0] if ctx_config else 512
-        sample = load_long_context(tokenizer, target_length=ctx_len)
+        print(f"  Data source: generated")
+        sample = load_long_context(tokenizer, target_length=ctx_len or 512)
         return sample["input_ids"]
 
 
@@ -179,8 +183,8 @@ def run_pipeline(config: Dict, experiments_to_run: Optional[List[str]] = None):
             output_dir = output_base / model_short / f"ctx{ctx_len}"
             output_dir.mkdir(parents=True, exist_ok=True)
             
-            # Load data
-            input_ids = load_data(config, adapter.tokenizer)
+            # Load data (tries data/ctx{N}/ first, then falls back)
+            input_ids = load_data(config, adapter.tokenizer, ctx_len=ctx_len)
             
             # Context length enforcement
             actual_len = input_ids.shape[1]
