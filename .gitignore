@@ -104,6 +104,8 @@ Thumbs.db
 # Project specific
 data/raw/
 data/processed/
+data/slimpajama/     # SlimPajama-6B cache (~20GB)
+data/ctx*/           # Context-specific samples
 outputs/
 *.pt
 *.pth
