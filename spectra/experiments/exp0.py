@@ -66,16 +66,28 @@ def run_exp0(context: Dict[str, Any]) -> Dict[str, Any]:
                 head_q_norm = q_norms[0, head, :].cpu().numpy()
                 
                 # Remove NaN
-                valid = ~np.isnan(head_entropy)
+                valid = ~np.isnan(head_entropy) & ~np.isnan(head_q_norm)
                 if valid.sum() < 10:
                     continue
                 
                 e = head_entropy[valid]
                 q = head_q_norm[valid]
                 
-                # Correlation
-                r_pearson, p_pearson = stats.pearsonr(q, e)
-                r_spearman, p_spearman = stats.spearmanr(q, e)
+                # Check for variance (correlation undefined if constant)
+                if np.std(e) < 1e-8 or np.std(q) < 1e-8:
+                    continue
+                
+                # Correlation with error handling
+                try:
+                    r_pearson, p_pearson = stats.pearsonr(q, e)
+                    r_spearman, p_spearman = stats.spearmanr(q, e)
+                    
+                    # Skip if NaN
+                    if np.isnan(r_pearson) or np.isnan(r_spearman):
+                        continue
+                        
+                except Exception:
+                    continue
                 
                 results.append({
                     'layer': layer,
