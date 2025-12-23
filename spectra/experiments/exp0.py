@@ -97,20 +97,27 @@ def run_exp0(context: Dict[str, Any]) -> Dict[str, Any]:
     df.to_csv(csv_path, index=False)
     print(f"  Saved: {csv_path}")
     
-    # Generate plots
-    _plot_correlation_heatmap(df, output_dir / "correlation_heatmap.png", adapter.info)
-    _plot_layer_summary(df, output_dir / "layer_summary.png")
+    # Generate plots with error handling
+    try:
+        if len(df) > 0:
+            _plot_correlation_heatmap(df, output_dir / "correlation_heatmap.png", adapter.info)
+            _plot_layer_summary(df, output_dir / "layer_summary.png")
+    except Exception as e:
+        print(f"  Warning: Plot generation failed: {e}")
     
     # Summary stats
-    print(f"\n  Mean Pearson r: {df['r_pearson'].mean():.4f}")
-    print(f"  Significant heads (p<0.05): {(df['p_pearson'] < 0.05).sum()}/{len(df)}")
+    if len(df) > 0:
+        print(f"\n  Mean Pearson r: {df['r_pearson'].mean():.4f}")
+        print(f"  Significant heads (p<0.05): {(df['p_pearson'] < 0.05).sum()}/{len(df)}")
+    else:
+        print(f"\n  Warning: No valid results collected")
     
     return {
         "exp": "exp0",
         "success": True,
         "csv_path": str(csv_path),
-        "mean_r": df['r_pearson'].mean(),
-        "significant_count": int((df['p_pearson'] < 0.05).sum())
+        "mean_r": float(df['r_pearson'].mean()) if len(df) > 0 else 0.0,
+        "significant_count": int((df['p_pearson'] < 0.05).sum()) if len(df) > 0 else 0
     }
 
 

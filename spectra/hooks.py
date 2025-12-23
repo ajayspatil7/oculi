@@ -118,6 +118,10 @@ class UnifiedHooks:
         """
         Q, K, V = self.compute_qkv(layer_idx, hidden_states)
         
+        # Clone to avoid in-place modification issues
+        Q = Q.clone()
+        K = K.clone()
+        
         # Apply scaling
         if q_scale != 1.0:
             Q[:, target_head, :, :] = Q[:, target_head, :, :] * q_scale
