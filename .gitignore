@@ -104,7 +104,6 @@ Thumbs.db
 # Project specific
 data/raw/
 data/processed/
-results/
 outputs/
 *.pt
 *.pth
@@ -124,3 +123,16 @@ checkpoints/
 
 # Models
 *.pkl
+
+# =============================================
+# EXPERIMENT RESULTS - TRACKED FOR SYNC
+# =============================================
+# We DO track:
+#   - .csv files (experiment results)
+#   - .png/.jpg files (plots)
+#   - notebooks/gain/
+#   - notebooks/key-scaling/
+#   - results/intervention/
+#
+# This allows cloud->local sync of experiment outputs.
+# =============================================
