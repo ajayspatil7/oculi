@@ -51,32 +51,42 @@ def get_git_commit() -> Optional[str]:
 
 
 def load_data(config: Dict, tokenizer, ctx_len: int = None) -> torch.Tensor:
-    """Load input data based on config, trying context-specific dirs first."""
+    """Load single input sample for backward compatibility."""
+    all_samples = load_all_samples(config, tokenizer, ctx_len)
+    return all_samples[0] if all_samples else None
+
+
+def load_all_samples(config: Dict, tokenizer, ctx_len: int = None, max_samples: int = 64) -> list:
+    """
+    Load ALL samples for multi-sample aggregation.
+    
+    Returns:
+        List of input_ids tensors [batch=1, seq_len]
+    """
     from src.data_loader import load_from_shards, load_long_context
     
     data_config = config.get("data", {})
     base_dir = data_config.get("directory", "data/processed")
-    sample_idx = data_config.get("sample_idx", 0)
     
     # Try context-specific directory first (e.g., data/ctx1024)
     if ctx_len:
         ctx_specific_dir = f"data/ctx{ctx_len}"
-        samples = load_from_shards(ctx_specific_dir, n_samples=sample_idx + 1, device="cuda")
-        if samples and len(samples) > sample_idx:
-            print(f"  Data source: {ctx_specific_dir}")
-            return samples[sample_idx]["input_ids"]
+        samples = load_from_shards(ctx_specific_dir, n_samples=max_samples, device="cuda")
+        if samples and len(samples) > 0:
+            print(f"  Data source: {ctx_specific_dir} ({len(samples)} samples)")
+            return [s["input_ids"] for s in samples]
     
     # Fallback to default directory
-    samples = load_from_shards(base_dir, n_samples=sample_idx + 1, device="cuda")
+    samples = load_from_shards(base_dir, n_samples=max_samples, device="cuda")
     
-    if samples and len(samples) > sample_idx:
-        print(f"  Data source: {base_dir}")
-        return samples[sample_idx]["input_ids"]
+    if samples and len(samples) > 0:
+        print(f"  Data source: {base_dir} ({len(samples)} samples)")
+        return [s["input_ids"] for s in samples]
     else:
         # Fallback to generated sample
-        print(f"  Data source: generated")
+        print(f"  Data source: generated (1 sample)")
         sample = load_long_context(tokenizer, target_length=ctx_len or 512)
-        return sample["input_ids"]
+        return [sample["input_ids"]]
 
 
 def create_metadata(
@@ -183,27 +193,29 @@ def run_pipeline(config: Dict, experiments_to_run: Optional[List[str]] = None):
             output_dir = output_base / model_short / f"ctx{ctx_len}"
             output_dir.mkdir(parents=True, exist_ok=True)
             
-            # Load data (tries data/ctx{N}/ first, then falls back)
-            input_ids = load_data(config, adapter.tokenizer, ctx_len=ctx_len)
+            # Load ALL samples (tries data/ctx{N}/ first, then falls back)
+            all_samples = load_all_samples(config, adapter.tokenizer, ctx_len=ctx_len)
             
-            # Context length enforcement
-            actual_len = input_ids.shape[1]
+            # Context length enforcement (check first sample)
+            first_sample = all_samples[0]
+            actual_len = first_sample.shape[1]
             
             if actual_len < ctx_len:
                 print(f"  ⚠️ Sample has only {actual_len} tokens, need {ctx_len}")
                 print(f"  ⚠️ SKIPPING ctx{ctx_len} (insufficient data)")
                 continue
             
-            # Truncate to exact context length
+            # Truncate all samples to exact context length
             if actual_len > ctx_len:
-                input_ids = input_ids[:, :ctx_len]
+                all_samples = [s[:, :ctx_len] for s in all_samples]
             
-            print(f"  Input tokens: {input_ids.shape[1]} (enforced)")
+            print(f"  Input: {len(all_samples)} samples × {all_samples[0].shape[1]} tokens")
             
             # Create context for experiments
             context = {
                 "adapter": adapter,
-                "input_ids": input_ids,
+                "input_ids": all_samples[0],  # Backward compat: first sample
+                "all_samples": all_samples,   # NEW: all samples for aggregation
                 "output_dir": str(output_dir),
                 "config": config,
                 "context_length": ctx_len

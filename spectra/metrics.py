@@ -14,16 +14,29 @@ from typing import Optional, Tuple
 def compute_attention_entropy(
     attention_probs: torch.Tensor,
     ignore_first_n: int = 2,
+    last_k: int = None,
     eps: float = 1e-10
 ) -> torch.Tensor:
     """
     Compute attention entropy for each query position.
     
-    H = -sum(p * log(p))
+    LOCKED DEFINITION (for reproducibility):
+    =========================================
+    H(t) = -Σ_{i=0}^{t} p(i|t) * log(p(i|t))
+    
+    Where:
+        - t is the query position (token index)
+        - p(i|t) is the attention weight from position t to position i
+        - The sum is over all valid key positions [0, t] (causal mask)
+    
+    Entropy measures attention "diffuseness":
+        - Low H → focused attention (sharp distribution)
+        - High H → diffuse attention (uniform distribution)
     
     Args:
         attention_probs: [batch, heads, seq, seq] attention weights
-        ignore_first_n: Ignore first N positions (padding artifacts)
+        ignore_first_n: Ignore first N positions (BOS/padding artifacts)
+        last_k: If set, only compute entropy for last K positions
         eps: Small constant for numerical stability
         
     Returns:
@@ -32,13 +45,19 @@ def compute_attention_entropy(
     # Clamp for numerical stability
     probs = torch.clamp(attention_probs, min=eps, max=1.0)
     
-    # Compute entropy: -sum(p * log(p))
+    # Compute entropy: H = -Σp*log(p)
     log_probs = torch.log(probs)
     entropy = -torch.sum(probs * log_probs, dim=-1)
     
-    # Mask first N positions
+    # Mask first N positions (BOS/padding artifacts)
     if ignore_first_n > 0:
         entropy[:, :, :ignore_first_n] = float('nan')
+    
+    # If last_k specified, mask earlier positions
+    if last_k is not None and last_k > 0:
+        seq_len = entropy.shape[-1]
+        start_pos = max(seq_len - last_k, ignore_first_n)
+        entropy[:, :, :start_pos] = float('nan')
     
     return entropy
 
@@ -163,3 +182,32 @@ def compute_linear_gain(
     slope, intercept, r_value, p_value, std_err = stats.linregress(log_alphas, values)
     
     return slope, r_value ** 2
+
+
+def aggregate_across_samples(
+    sample_values: list,
+    ignore_nan: bool = True
+) -> Tuple[float, float, int]:
+    """
+    Aggregate metrics ACROSS multiple samples.
+    
+    This provides proper variance estimation for multi-sample experiments.
+    
+    Args:
+        sample_values: List of scalar values (one per sample)
+        ignore_nan: Exclude NaN values
+        
+    Returns:
+        (mean, std, n_valid_samples)
+    """
+    arr = np.array(sample_values)
+    
+    if ignore_nan:
+        arr = arr[~np.isnan(arr)]
+    
+    n_valid = len(arr)
+    
+    if n_valid == 0:
+        return float('nan'), float('nan'), 0
+    
+    return float(np.mean(arr)), float(np.std(arr)), n_valid
