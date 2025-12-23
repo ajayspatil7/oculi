@@ -12,12 +12,19 @@ Key Insight:
 - If Q-scaling produces stronger/different effects than K-scaling, then
   query magnitude specifically controls attention sharpness.
 
-Experimental Design:
-- Same model, same input, same head, same alphas
-- Only difference: which tensor gets scaled (Q vs K)
+Experimental Invariants (MUST NOT CHANGE):
+- Same pretrained model
+- Same input sequence
+- Same attention head(s)
+- Same layer(s)
+- Same entropy computation
+- Same scaling values
+- V (value) vectors are NEVER modified
+
+Only one thing changes per experiment: what gets scaled (Q or K).
 
 Usage:
-    python notebooks/key-scaling/run_qk_comparison.py \
+    python notebooks/key-scaling/run_qk_comparison.py \\
         --target-layer 12 --target-head 0
 
 All outputs saved to: notebooks/key-scaling/
@@ -98,7 +105,13 @@ class QKScalingProfiler:
         self.hooks: List = []
     
     def _get_hidden_hook(self, layer_idx: int):
-        """Create hook to capture pre-attention hidden states."""
+        """
+        Create hook to capture pre-attention hidden states.
+        
+        We capture hidden states after input LayerNorm, matching the inputs
+        used for QKV projection in standard LLaMA blocks. This is the correct
+        intervention point for analyzing attention behavior.
+        """
         def hook_fn(module, input, output):
             self._hidden_states[layer_idx] = output.detach()
         return hook_fn
@@ -141,7 +154,9 @@ class QKScalingProfiler:
             V = V.view(batch_size, seq_len, self.n_kv_heads, self.head_dim).transpose(1, 2)
             
             # === SCALING ===
-            # Only scale the target head
+            # Only scale at the target layer, target head
+            # All other layers and heads remain UNCHANGED
+            # V (value) vectors are NEVER modified in this experiment
             if layer_idx == self.target_layer:
                 if q_scale != 1.0:
                     Q[:, self.target_head, :, :] = Q[:, self.target_head, :, :] * q_scale
@@ -153,6 +168,7 @@ class QKScalingProfiler:
                     kv_head_idx = self.target_head % self.n_kv_heads
                     K[:, kv_head_idx, :, :] = K[:, kv_head_idx, :, :] * k_scale
         
+        # NOTE: V is explicitly unchanged in all experiments
         return Q, K, V
     
     def _compute_attention_probs(
@@ -300,6 +316,9 @@ class QKScalingProfiler:
             print(f"{'='*60}")
             print(f"Target: Layer {self.target_layer}, Head {self.target_head}")
             print(f"Alphas: {alphas}")
+            print(f"")
+            print(f"⚠️  Scaling applied ONLY at Layer {self.target_layer}, Head {self.target_head}")
+            print(f"⚠️  V (value) vectors are NEVER modified")
             print(f"{'='*60}")
         
         # Q-scaling sweep
@@ -407,6 +426,74 @@ def plot_qk_comparison(
     plt.close()
     
     print(f"  Saved: {output_path}")
+
+
+def plot_delta_entropy(
+    q_results: List[ScalingResult],
+    k_results: List[ScalingResult],
+    output_path: Path,
+    layer: int = None,
+    head: int = None
+):
+    """
+    Plot delta-normalized entropy: ΔH(α) = H(α) - H(α=1.0)
+    
+    This removes head-specific entropy scale and emphasizes the response,
+    making comparisons cleaner for publication.
+    """
+    fig, ax = plt.subplots(figsize=(10, 7))
+    
+    # Extract data
+    alphas = [r.alpha for r in q_results]
+    q_entropies = [r.mean_entropy for r in q_results]
+    k_entropies = [r.mean_entropy for r in k_results]
+    
+    # Find baseline (α=1.0) values
+    baseline_idx = alphas.index(1.0) if 1.0 in alphas else len(alphas) // 2
+    q_baseline = q_entropies[baseline_idx]
+    k_baseline = k_entropies[baseline_idx]
+    
+    # Compute delta: ΔH = H(α) - H(α=1.0)
+    q_delta = [h - q_baseline for h in q_entropies]
+    k_delta = [h - k_baseline for h in k_entropies]
+    
+    # Plot Q-scaling delta
+    ax.plot(alphas, q_delta, 'o-', 
+            color='#3498db', linewidth=2.5, markersize=10,
+            markeredgecolor='white', markeredgewidth=2,
+            label='Q-scaling (Query)')
+    
+    # Plot K-scaling delta
+    ax.plot(alphas, k_delta, 's--', 
+            color='#e74c3c', linewidth=2.5, markersize=10,
+            markeredgecolor='white', markeredgewidth=2,
+            label='K-scaling (Key)')
+    
+    # Reference lines
+    ax.axvline(x=1.0, color='gray', linestyle=':', linewidth=2, alpha=0.7)
+    ax.axhline(y=0, color='gray', linestyle='-', linewidth=1, alpha=0.5)
+    
+    # Labels
+    ax.set_xlabel('Scaling Factor (α)', fontsize=12)
+    ax.set_ylabel('ΔH = H(α) - H(α=1.0)', fontsize=12)
+    
+    if layer is not None and head is not None:
+        ax.set_title(f"Delta Entropy Response to Q vs K Scaling\nLayer {layer}, Head {head}", 
+                     fontsize=14, fontweight='bold')
+    else:
+        ax.set_title("Delta Entropy Response to Q vs K Scaling", fontsize=14, fontweight='bold')
+    
+    ax.legend(loc='best', fontsize=11)
+    ax.grid(True, linestyle='--', alpha=0.7)
+    ax.set_xticks(alphas)
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    
+    print(f"  Saved: {output_path}")
+
+
 
 
 def save_results_csv(
@@ -602,6 +689,10 @@ def main():
     # k_eff plot
     keff_plot = OUTPUT_DIR / f"qk_keff_comparison_L{args.target_layer}_H{args.target_head}.png"
     plot_qk_comparison(q_results, k_results, keff_plot, "k_eff", args.target_layer, args.target_head)
+    
+    # Delta entropy plot (recommended for publication - removes head-specific scale)
+    delta_plot = OUTPUT_DIR / f"qk_delta_entropy_L{args.target_layer}_H{args.target_head}.png"
+    plot_delta_entropy(q_results, k_results, delta_plot, args.target_layer, args.target_head)
     
     # Compute sensitivity metrics
     print("\n" + "=" * 70)
