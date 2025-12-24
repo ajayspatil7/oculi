@@ -13,6 +13,11 @@ echo "========================================================"
 echo "[1/3] Checking dependencies..."
 # Fix GLIBCXX error (point to conda's newer libstdc++)
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/conda/lib
+
+# Fix broken torchvision (RuntimeError: operator torchvision::nms does not exist)
+echo "[1/3] Fixing environment (forcing reinstall of torchvision)..."
+pip install --force-reinstall torchvision
+
 pip install -r requirements.txt > /dev/null
 
 # 2. Prepare Mistral Data (using LLaMA sources for exact replication)
