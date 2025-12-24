@@ -12,15 +12,16 @@ experiment:
 
 # Model configurations
 # Model configurations
-# LOCKED: Single model for this run (Updated for Mistral run)
+# Model configurations
+# LOCKED: Single model for this run (Updated for LLaMA re-run)
 models:
-  # - name: "meta-llama/Meta-Llama-3-8B"
-  #   family: "llama"
-  #   enabled: false
+  - name: "meta-llama/Meta-Llama-3-8B"
+    family: "llama"
+    enabled: true
 
   - name: "mistralai/Mistral-7B-v0.1"
     family: "mistral"
-    enabled: true
+    enabled: false
 
 # Context lengths - CORE VARIABLE FOR THIS RUN
 context_lengths:
@@ -67,7 +68,7 @@ experiments:
 data:
   source: "preprocessed"
   directory: "data/processed"
-  context_dir_template: "data/mistral/ctx{ctx_len}" # Overrides default data/ctx{N}
+  # context_dir_template: "data/mistral/ctx{ctx_len}"  # Commented out for LLaMA default (data/ctxN)
   sample_idx: 0
   note: "Same sample reused across all context lengths for controlled comparison"
 
