@@ -68,9 +68,11 @@ def load_all_samples(config: Dict, tokenizer, ctx_len: int = None, max_samples: 
     data_config = config.get("data", {})
     base_dir = data_config.get("directory", "data/processed")
     
-    # Try context-specific directory first (e.g., data/ctx1024)
+    # Try context-specific directory
+    ctx_dir_template = data_config.get("context_dir_template", "data/ctx{ctx_len}")
+    
     if ctx_len:
-        ctx_specific_dir = f"data/ctx{ctx_len}"
+        ctx_specific_dir = ctx_dir_template.format(ctx_len=ctx_len)
         samples = load_from_shards(ctx_specific_dir, n_samples=max_samples, device="cuda")
         if samples and len(samples) > 0:
             print(f"  Data source: {ctx_specific_dir} ({len(samples)} samples)")

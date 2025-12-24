@@ -11,24 +11,21 @@ experiment:
   seed: 42
 
 # Model configurations
-# LOCKED: Single model for this run
+# Model configurations
+# LOCKED: Single model for this run (Updated for Mistral run)
 models:
-  - name: "meta-llama/Meta-Llama-3-8B"
-    family: "llama"
-    enabled: true
-
-  # Future models (disabled for Phase1-M initial run):
-  # - name: "meta-llama/Meta-Llama-3-70B"
+  # - name: "meta-llama/Meta-Llama-3-8B"
   #   family: "llama"
   #   enabled: false
-  # - name: "mistralai/Mistral-7B-v0.1"
-  #   family: "mistral"
-  #   enabled: false
+
+  - name: "mistralai/Mistral-7B-v0.1"
+    family: "mistral"
+    enabled: true
 
 # Context lengths - CORE VARIABLE FOR THIS RUN
 context_lengths:
-  planned: [128, 512, 1024]
-  enabled: [128, 512, 1024]
+  planned: [128, 512, 1024, 2048]
+  enabled: [128, 512, 1024, 2048]
 
 # Scaling factors for intervention experiments
 alphas:
@@ -70,6 +67,7 @@ experiments:
 data:
   source: "preprocessed"
   directory: "data/processed"
+  context_dir_template: "data/mistral/ctx{ctx_len}" # Overrides default data/ctx{N}
   sample_idx: 0
   note: "Same sample reused across all context lengths for controlled comparison"
 
