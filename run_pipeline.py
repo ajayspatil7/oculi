@@ -196,20 +196,22 @@ def run_pipeline(config: Dict, experiments_to_run: Optional[List[str]] = None):
             # Load ALL samples (tries data/ctx{N}/ first, then falls back)
             all_samples = load_all_samples(config, adapter.tokenizer, ctx_len=ctx_len)
             
-            # Context length enforcement (check first sample)
-            first_sample = all_samples[0]
-            actual_len = first_sample.shape[1]
+            # Context length enforcement (check ALL samples)
+            valid_samples = []
+            for s in all_samples:
+                actual_len = s.shape[1]
+                if actual_len >= ctx_len:
+                    # Truncate to exact length
+                    valid_samples.append(s[:, :ctx_len])
             
-            if actual_len < ctx_len:
-                print(f"  ⚠️ Sample has only {actual_len} tokens, need {ctx_len}")
-                print(f"  ⚠️ SKIPPING ctx{ctx_len} (insufficient data)")
+            all_samples = valid_samples
+            
+            if not all_samples:
+                print(f"  ⚠️ All samples too short (need {ctx_len})")
+                print(f"  ⚠️ SKIPPING ctx{ctx_len}")
                 continue
             
-            # Truncate all samples to exact context length
-            if actual_len > ctx_len:
-                all_samples = [s[:, :ctx_len] for s in all_samples]
-            
-            print(f"  Input: {len(all_samples)} samples × {all_samples[0].shape[1]} tokens")
+            print(f"  Input: {len(all_samples)} samples × {ctx_len} tokens")
             
             # Create context for experiments
             context = {
