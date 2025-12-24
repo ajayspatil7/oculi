@@ -14,19 +14,9 @@ echo "========================================================"
 echo "[1/2] Checking environment..."
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/conda/lib
 
-# Reinstall torchvision if needed (safety check, though likely fixed)
-# pip install --force-reinstall torchvision
-
 pip install -r requirements.txt > /dev/null
 
 # 2. Run Pipeline
-# Optional: Backup previous results (since we are checking for symmetry change)
-if [ -d "results/Meta-Llama-3-8B" ]; then
-    BACKUP_DIR="results/Meta-Llama-3-8B_backup_$(date +%Y%m%d_%H%M%S)"
-    echo "⚠️  Found existing results. Backing up to $BACKUP_DIR..."
-    mv "results/Meta-Llama-3-8B" "$BACKUP_DIR"
-fi
-
 # config/experiment.yaml is already configured for LLaMA
 echo "[2/2] Running Experiment Pipeline..."
 python run_pipeline.py
