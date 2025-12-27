@@ -1,0 +1,29 @@
+# Results (large files)
+results/
+!results/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Environment
+.env
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Model cache (download fresh)
+.cache/
