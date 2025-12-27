@@ -1,5 +1,6 @@
-# Results (large files)
+# Results and findings (local only)
 results/
+findings/
 !results/.gitkeep
 
 # Python
