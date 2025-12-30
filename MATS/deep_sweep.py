@@ -369,15 +369,7 @@ def main():
             output = ""
             entropy_val = None
             try:
-                # Run with cache to get both output and attention patterns
-                _, cache = model.run_with_cache(
-                    problem.prompt,
-                    max_new_tokens=200,
-                    temperature=0.0,
-                    do_sample=False,
-                )
-                
-                # Get generated output
+                # Generate output first
                 output = model.generate(
                     problem.prompt,
                     max_new_tokens=200,
@@ -385,20 +377,12 @@ def main():
                     do_sample=False,
                 )
                 
-                # Compute entropy on GENERATED tokens only (not prompt)
-                pattern = cache["pattern", TARGET_LAYER][0, TARGET_HEAD]  # [seq_len, seq_len]
-                seq_len = pattern.shape[0]
+                # Then get cache for entropy (on prompt only - that's where intervention happens)
+                _, cache = model.run_with_cache(problem.prompt)
                 
-                if seq_len > prompt_len:
-                    # Get entropy for generated positions only
-                    gen_pattern = pattern[prompt_len:, :]  # [gen_len, seq_len]
-                    # Compute mean entropy across generated positions
-                    gen_entropy = -torch.sum(gen_pattern * torch.log(gen_pattern + 1e-10), dim=-1)
-                    entropy_val = float(gen_entropy.mean().cpu())
-                else:
-                    # Fallback: use last position entropy
-                    last_pattern = pattern[-1, :]
-                    entropy_val = float(-torch.sum(last_pattern * torch.log(last_pattern + 1e-10)).cpu())
+                # Compute entropy on last position (where model decides next token)
+                pattern = cache["pattern", TARGET_LAYER][0, TARGET_HEAD, -1, :]
+                entropy_val = float(-torch.sum(pattern * torch.log(pattern + 1e-10)).cpu())
                     
             except Exception as e:
                 output = f"ERROR: {e}"
@@ -547,7 +531,7 @@ def main():
         "peak_alpha": float(peak_alpha),
         "peak_accuracy": float(peak_acc),
         "baseline_accuracy": float(baseline_acc),
-        "is_goldilocks": is_goldilocks,
+        "is_goldilocks": bool(is_goldilocks),
         "n_responsive_problems": int(n_responsive),
     }
     
