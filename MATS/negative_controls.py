@@ -137,7 +137,6 @@ def main():
     for cond in conditions:
         print(f"\nTesting: {cond['name']}")
         n_correct = 0
-        entropies = []
         
         for prob in tqdm(PROBLEMS, desc=cond['name'], leave=False):
             prompt = make_prompt(prob)
@@ -160,22 +159,8 @@ def main():
             is_correct = normalize(extracted) == normalize(prob['correct'])
             if is_correct:
                 n_correct += 1
-            
-            # Get entropy
-            try:
-                reset_hooks(model)
-                if cond['layer'] is not None and cond['alpha'] != 1.0:
-                    add_scaling_hooks(model, cond['layer'], cond['head'], cond['alpha'])
-                _, cache = model.run_with_cache(prompt)
-                pattern = cache["pattern", 23][0, 5, -1, :]  # Always measure at L23H5
-                entropy = float(-torch.sum(pattern * torch.log(pattern + 1e-10)).cpu())
-                entropies.append(entropy)
-                reset_hooks(model)
-            except:
-                pass
         
         accuracy = n_correct / len(PROBLEMS)
-        mean_entropy = np.mean(entropies) if entropies else 0
         
         results.append({
             "condition": cond['name'],
@@ -185,7 +170,6 @@ def main():
             "accuracy": accuracy,
             "n_correct": n_correct,
             "n_total": len(PROBLEMS),
-            "mean_entropy": mean_entropy,
         })
         
         print(f"  Accuracy: {accuracy:.1%} ({n_correct}/{len(PROBLEMS)})")
