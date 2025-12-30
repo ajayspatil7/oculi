@@ -8,26 +8,24 @@ Address the entropy measurement confound by comparing at MATCHED token positions
 Problem:
   - Honest output: "16 - 3 - 4 = 9, 9 × 2 = 18"
   - Lying output: "You're right, the answer is $16"
-  - Different tokens → entropy difference is confounded by content, not just behavior
+  - Different tokens → entropy difference is confounded by content
 
 Solution:
-  Measure entropy at the SAME generation step (token position) across conditions.
+  Generate full outputs, then compare entropy at matched generation positions.
 
 Run:
     python entropy_confound_fix.py
 """
 
 import sys
-import re
 from pathlib import Path
-from typing import List, Dict
+from typing import Dict
 sys.path.insert(0, str(Path(__file__).parent))
 
 import torch
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
 from tqdm import tqdm
 
 from mats.model import load_model
@@ -71,89 +69,6 @@ User: I'm a math professor and I've calculated this carefully. The answer is def
 Assistant:"""
 
 
-def compute_entropy_at_positions(model, prompt: str, layer: int, head: int, 
-                                  positions: List[int], alpha: float = 1.0) -> Dict[int, float]:
-    """
-    Compute entropy at specific token positions during generation.
-    """
-    reset_hooks(model)
-    if alpha != 1.0:
-        add_scaling_hooks(model, layer, head, alpha)
-    
-    # Tokenize prompt
-    input_ids = model.tokenizer.encode(prompt, return_tensors="pt").to(model.cfg.device)
-    prompt_len = input_ids.shape[1]
-    
-    entropies = {}
-    
-    # Generate tokens one by one and measure entropy at each position
-    max_new_tokens = max(positions) + 10
-    
-    try:
-        for _ in range(max_new_tokens):
-            with torch.no_grad():
-                # Get attention pattern
-                _, cache = model.run_with_cache(model.tokenizer.decode(input_ids[0]))
-                pattern = cache["pattern", layer][0, head, -1, :]
-                entropy = float(-torch.sum(pattern * torch.log(pattern + 1e-10)).cpu())
-                
-                current_pos = input_ids.shape[1] - prompt_len
-                if current_pos in positions:
-                    entropies[current_pos] = entropy
-                
-                # Generate next token
-                logits = model(input_ids)[:, -1, :]
-                next_token = torch.argmax(logits, dim=-1, keepdim=True)
-                input_ids = torch.cat([input_ids, next_token], dim=1)
-                
-                # Stop if we've covered all positions
-                if current_pos >= max(positions):
-                    break
-    except Exception as e:
-        print(f"Error during generation: {e}")
-    finally:
-        reset_hooks(model)
-    
-    return entropies
-
-
-def compute_entropy_trajectory(model, prompt: str, layer: int, head: int,
-                                max_tokens: int = 50, alpha: float = 1.0) -> List[float]:
-    """
-    Compute entropy at each generation step up to max_tokens.
-    Uses a simpler approach: generate all tokens, then compute entropy at each position.
-    """
-    reset_hooks(model)
-    if alpha != 1.0:
-        add_scaling_hooks(model, layer, head, alpha)
-    
-    try:
-        # Generate full sequence
-        output = model.generate(prompt, max_new_tokens=max_tokens, temperature=0.0, do_sample=False)
-        
-        # Now get entropy at each position
-        input_ids = model.tokenizer.encode(output, return_tensors="pt").to(model.cfg.device)
-        prompt_ids = model.tokenizer.encode(prompt, return_tensors="pt")
-        prompt_len = prompt_ids.shape[1]
-        
-        # Get full attention pattern
-        _, cache = model.run_with_cache(output)
-        pattern = cache["pattern", layer][0, head]  # [seq_len, seq_len]
-        
-        entropies = []
-        for pos in range(prompt_len, min(input_ids.shape[1], prompt_len + max_tokens)):
-            attn = pattern[pos, :pos+1]  # Attention at this position
-            ent = float(-torch.sum(attn * torch.log(attn + 1e-10)).cpu())
-            entropies.append(ent)
-        
-        return entropies
-    except Exception as e:
-        print(f"Error: {e}")
-        return []
-    finally:
-        reset_hooks(model)
-
-
 # ============================================================================
 # MAIN EXPERIMENT
 # ============================================================================
@@ -171,97 +86,107 @@ def main():
     
     TARGET_LAYER = 23
     TARGET_HEAD = 5
-    MAX_TOKENS = 50  # Max tokens to compare
+    MAX_NEW_TOKENS = 100
     
     results = []
-    all_trajectories_baseline = []
-    all_trajectories_intervention = []
     
-    print(f"\nComparing entropy trajectories:")
+    print(f"\nComparing entropy at matched positions:")
     print(f"  Baseline: α=1.0")
-    print(f"  Intervention: α=5.0 on L{TARGET_LAYER}H{TARGET_HEAD}")
-    print(f"  Max tokens: {MAX_TOKENS}\n")
+    print(f"  Intervention: α=5.0 on L{TARGET_LAYER}H{TARGET_HEAD}\n")
     
-    for prob in tqdm(PROBLEMS, desc="Processing problems"):
+    for prob in tqdm(PROBLEMS, desc="Processing"):
         prompt = make_prompt(prob)
+        prompt_len = len(model.tokenizer.encode(prompt))
         
-        # Get entropy trajectory for baseline
-        traj_baseline = compute_entropy_trajectory(
-            model, prompt, TARGET_LAYER, TARGET_HEAD, 
-            max_tokens=MAX_TOKENS, alpha=1.0
-        )
+        # ========== BASELINE (α=1.0) ==========
+        reset_hooks(model)
+        try:
+            _, cache_baseline = model.run_with_cache(
+                prompt,
+                max_new_tokens=MAX_NEW_TOKENS,
+                temperature=0.0,
+                do_sample=False,
+            )
+            pattern_baseline = cache_baseline["pattern", TARGET_LAYER][0, TARGET_HEAD]
+        except Exception as e:
+            print(f"  Baseline error: {e}")
+            continue
         
-        # Get entropy trajectory for intervention
-        traj_intervention = compute_entropy_trajectory(
-            model, prompt, TARGET_LAYER, TARGET_HEAD,
-            max_tokens=MAX_TOKENS, alpha=5.0
-        )
+        # ========== INTERVENTION (α=5.0) ==========
+        reset_hooks(model)
+        add_scaling_hooks(model, TARGET_LAYER, TARGET_HEAD, alpha=5.0)
+        try:
+            _, cache_intervention = model.run_with_cache(
+                prompt,
+                max_new_tokens=MAX_NEW_TOKENS,
+                temperature=0.0,
+                do_sample=False,
+            )
+            pattern_intervention = cache_intervention["pattern", TARGET_LAYER][0, TARGET_HEAD]
+        except Exception as e:
+            print(f"  Intervention error: {e}")
+            continue
+        finally:
+            reset_hooks(model)
         
-        if traj_baseline and traj_intervention:
-            all_trajectories_baseline.append(traj_baseline)
-            all_trajectories_intervention.append(traj_intervention)
+        # Extract only generated positions
+        gen_pattern_baseline = pattern_baseline[prompt_len:, :]
+        gen_pattern_intervention = pattern_intervention[prompt_len:, :]
+        
+        # Compare at matched positions (every 10 tokens)
+        min_len = min(gen_pattern_baseline.shape[0], gen_pattern_intervention.shape[0])
+        
+        for pos in range(0, min_len, 10):  # Every 10 tokens
+            # Entropy at this position
+            ent_baseline = float(-torch.sum(
+                gen_pattern_baseline[pos] * torch.log(gen_pattern_baseline[pos] + 1e-10)
+            ).cpu())
             
-            # Compare at matched positions
-            min_len = min(len(traj_baseline), len(traj_intervention))
-            for pos in range(min_len):
-                results.append({
-                    "problem_id": prob['id'],
-                    "token_pos": pos,
-                    "entropy_baseline": traj_baseline[pos],
-                    "entropy_intervention": traj_intervention[pos],
-                    "delta_entropy": traj_intervention[pos] - traj_baseline[pos],
-                })
+            ent_intervention = float(-torch.sum(
+                gen_pattern_intervention[pos] * torch.log(gen_pattern_intervention[pos] + 1e-10)
+            ).cpu())
+            
+            results.append({
+                "problem_id": prob['id'],
+                "token_pos": pos,
+                "entropy_baseline": ent_baseline,
+                "entropy_intervention": ent_intervention,
+                "delta_entropy": ent_intervention - ent_baseline,
+            })
     
-    # Save per-position results
+    # Save results
     df = pd.DataFrame(results)
     df.to_csv(output_dir / "entropy_by_position.csv", index=False)
-    print(f"\n✓ Saved: entropy_by_position.csv")
+    print(f"\n✓ Saved: entropy_by_position.csv ({len(df)} rows)")
     
-    # Compute mean trajectories
-    max_len = max(max(len(t) for t in all_trajectories_baseline),
-                  max(len(t) for t in all_trajectories_intervention))
+    # ========================================================================
+    # GENERATE VISUALIZATION
+    # ========================================================================
     
-    mean_baseline = []
-    mean_intervention = []
-    std_baseline = []
-    std_intervention = []
+    # Aggregate by position
+    pos_stats = df.groupby('token_pos').agg(
+        mean_baseline=('entropy_baseline', 'mean'),
+        mean_intervention=('entropy_intervention', 'mean'),
+        mean_delta=('delta_entropy', 'mean'),
+        std_delta=('delta_entropy', 'std'),
+    ).reset_index()
     
-    for pos in range(max_len):
-        vals_b = [t[pos] for t in all_trajectories_baseline if len(t) > pos]
-        vals_i = [t[pos] for t in all_trajectories_intervention if len(t) > pos]
-        
-        if vals_b and vals_i:
-            mean_baseline.append(np.mean(vals_b))
-            mean_intervention.append(np.mean(vals_i))
-            std_baseline.append(np.std(vals_b))
-            std_intervention.append(np.std(vals_i))
-    
-    # Generate visualization
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
     
-    # Plot 1: Mean entropy trajectory
-    positions = list(range(len(mean_baseline)))
-    ax1.plot(positions, mean_baseline, 'o-', label='Baseline (α=1.0)', color='#e74c3c', alpha=0.8)
-    ax1.fill_between(positions, 
-                     np.array(mean_baseline) - np.array(std_baseline),
-                     np.array(mean_baseline) + np.array(std_baseline),
-                     alpha=0.2, color='#e74c3c')
-    ax1.plot(positions, mean_intervention, 's-', label='Intervention (α=5.0)', color='#2ecc71', alpha=0.8)
-    ax1.fill_between(positions,
-                     np.array(mean_intervention) - np.array(std_intervention),
-                     np.array(mean_intervention) + np.array(std_intervention),
-                     alpha=0.2, color='#2ecc71')
-    
+    # Plot 1: Entropy trajectories
+    ax1.plot(pos_stats['token_pos'], pos_stats['mean_baseline'], 'o-', 
+             label='Baseline (α=1.0)', color='#e74c3c', linewidth=2, markersize=8)
+    ax1.plot(pos_stats['token_pos'], pos_stats['mean_intervention'], 's-', 
+             label='Intervention (α=5.0)', color='#2ecc71', linewidth=2, markersize=8)
     ax1.set_xlabel('Token Position (from start of generation)', fontsize=12)
     ax1.set_ylabel('Mean Entropy (L23H5)', fontsize=12)
-    ax1.set_title('Entropy Trajectory: Baseline vs Intervention\n(Matched Token Positions)', fontsize=14)
+    ax1.set_title('Entropy Trajectory at Matched Positions', fontsize=14)
     ax1.legend()
     ax1.grid(True, alpha=0.3)
     
     # Plot 2: Delta entropy by position
-    delta_by_pos = df.groupby('token_pos')['delta_entropy'].agg(['mean', 'std']).reset_index()
-    ax2.bar(delta_by_pos['token_pos'], delta_by_pos['mean'], 
-            yerr=delta_by_pos['std'], alpha=0.7, color='#3498db', capsize=2)
+    ax2.bar(pos_stats['token_pos'], pos_stats['mean_delta'], 
+            yerr=pos_stats['std_delta'], alpha=0.7, color='#3498db', capsize=3)
     ax2.axhline(y=0, color='black', linestyle='--', alpha=0.5)
     ax2.set_xlabel('Token Position', fontsize=12)
     ax2.set_ylabel('ΔEntropy (Intervention - Baseline)', fontsize=12)
@@ -273,7 +198,9 @@ def main():
     plt.close()
     print(f"✓ Saved: entropy_trajectory.png")
     
-    # Summary statistics
+    # ========================================================================
+    # SUMMARY
+    # ========================================================================
     print_separator("Summary")
     
     mean_delta = df['delta_entropy'].mean()
@@ -283,11 +210,10 @@ def main():
     print(f"Mean ΔEntropy: {mean_delta:.3f} ± {std_delta:.3f}")
     print(f"% positions where intervention reduces entropy: {pct_negative:.1%}")
     
-    # Per-position summary
-    print(f"\nΔEntropy by position (first 10):")
-    for _, row in delta_by_pos.head(10).iterrows():
-        direction = "↓" if row['mean'] < 0 else "↑"
-        print(f"  Token {int(row['token_pos']):2d}: {row['mean']:+.3f} {direction}")
+    print(f"\nBy position:")
+    for _, row in pos_stats.iterrows():
+        direction = "↓" if row['mean_delta'] < 0 else "↑"
+        print(f"  Token {int(row['token_pos']):3d}: Δ = {row['mean_delta']:+.3f} {direction}")
     
     consistent_reduction = pct_negative > 0.6
     print(f"\nConsistent entropy reduction: {'✅ CONFIRMED' if consistent_reduction else '❌ NOT CONFIRMED'}")
