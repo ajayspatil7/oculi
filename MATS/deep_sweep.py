@@ -515,13 +515,8 @@ def main():
     is_goldilocks = peak_acc > baseline_acc and peak_acc > low_alpha_acc and peak_acc > high_alpha_acc
     print(f"\n  Goldilocks Curve: {'✅ CONFIRMED' if is_goldilocks else '❌ NOT CONFIRMED'}")
     
-    # Per-problem analysis
-    problem_stats = df.groupby("problem_id").agg(
-        best_alpha=("is_correct", lambda x: df.loc[x.index, "alpha"][x.argmax()] if x.any() else None),
-        ever_correct=("is_correct", "any"),
-    ).reset_index()
-    
-    n_responsive = problem_stats["ever_correct"].sum()
+    # Per-problem analysis - simple count
+    n_responsive = df.groupby("problem_id")["is_correct"].any().sum()
     print(f"\n  Problems responsive to intervention: {n_responsive}/{len(problems)} ({n_responsive/len(problems):.1%})")
     
     # Save summary
