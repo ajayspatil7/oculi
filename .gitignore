@@ -73,7 +73,7 @@ venv.bak/
 *.pth
 *.safetensors
 data/
-models/
+model_weights/
 
 # Logs
 *.log

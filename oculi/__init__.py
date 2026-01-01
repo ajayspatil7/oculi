@@ -4,61 +4,67 @@ Oculi: Mechanistic Interpretability Toolkit
 
 A low-level, surgical instrumentation layer for LLMs.
 
-Public API Exports
-------------------
-- load: Load a model with auto-detected adapter
-- ModelAdapter: Abstract model interface
-- AttentionCapture: Captured attention data container
-- CaptureConfig: Capture configuration
+Public API
+----------
+Model Adapters (explicit, no magic):
+    from oculi.models.llama import LlamaAttentionAdapter
 
-Modules
--------
-- oculi.capture: Capture system
-- oculi.analysis: Analysis functions
-- oculi.intervention: Intervention classes
-- oculi.visualize: Visualization utilities
+Data Structures:
+    - AttentionCapture: Captured attention data
+    - AttentionStructure: Model architecture info
+    - CaptureConfig: Capture configuration
+
+Modules:
+    - oculi.models: Model-specific adapters
+    - oculi.capture: Capture utilities
+    - oculi.analysis: Analysis functions
+    - oculi.intervention: Intervention classes
 
 Example
 -------
->>> import oculi
->>> model = oculi.load("meta-llama/Meta-Llama-3-8B")
->>> capture = model.capture(input_ids)
->>> entropy = oculi.analysis.EntropyAnalysis.token_entropy(capture)
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from oculi.models.llama import LlamaAttentionAdapter
+    
+    model = AutoModelForCausalLM.from_pretrained("meta-llama/Meta-Llama-3-8B")
+    tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B")
+    
+    adapter = LlamaAttentionAdapter(model, tokenizer)
+    capture = adapter.capture(input_ids)
 
-Version: 0.1.0-dev
+Version: 0.2.0-dev
 """
 
-__version__ = "0.1.0-dev"
+__version__ = "0.2.0-dev"
 __author__ = "Ajay S Patil"
 
 # =============================================================================
-# PUBLIC API — These are the ONLY exports
+# PUBLIC API — Core Data Structures
 # =============================================================================
 
-# Core data structures
 from oculi.capture.structures import (
     AttentionCapture,
     AttentionStructure,
     CaptureConfig,
 )
 
-# Model adapter interface
-from oculi.capture.adapter import ModelAdapter
-
-# Convenience loader
-from oculi.capture.loader import load
-
-# Analysis module (import as namespace)
-from oculi import analysis
-
-# Intervention module (import as namespace)
-from oculi import intervention
-
-# Visualization module (import as namespace)
-from oculi import visualize
+# Base adapter contract
+from oculi.models.base import (
+    AttentionAdapter,
+    UnsupportedModelError,
+    CaptureError,
+)
 
 # =============================================================================
-# PUBLIC API LIST — For documentation and linting
+# PUBLIC API — Modules (imported as namespaces)
+# =============================================================================
+
+from oculi import models
+from oculi import analysis
+from oculi import intervention
+from oculi import capture
+
+# =============================================================================
+# PUBLIC API LIST
 # =============================================================================
 
 __all__ = [
@@ -67,28 +73,17 @@ __all__ = [
     
     # Core structures
     "AttentionCapture",
-    "AttentionStructure",
+    "AttentionStructure", 
     "CaptureConfig",
     
-    # Model interface
-    "ModelAdapter",
+    # Base adapter
+    "AttentionAdapter",
+    "UnsupportedModelError",
+    "CaptureError",
     
-    # Loader
-    "load",
-    
-    # Modules (as namespaces)
+    # Modules
+    "models",
     "analysis",
     "intervention",
-    "visualize",
+    "capture",
 ]
-
-# =============================================================================
-# INTERNAL — Do not import from _private directly
-# =============================================================================
-# The _private package contains implementation details:
-# - _private.adapters: Model-specific adapter implementations
-# - _private.hooks: PyTorch hook machinery
-# - _private.cache: Memory optimization
-# - _private.validation: Internal checks
-#
-# These may change without notice. Use public API only.

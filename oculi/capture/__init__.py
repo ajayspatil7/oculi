@@ -1,20 +1,18 @@
 """
 Oculi Capture Module
-======================
+====================
 
-Public API for capturing attention data from transformer models.
+Utilities for capturing attention data from transformer models.
 
-Classes
--------
-- AttentionCapture: Immutable container for captured data
-- AttentionStructure: Model attention architecture description
-- CaptureConfig: Configuration for capture operation
-- ModelAdapter: Abstract model interface
-- AttentionHook: Hook registration and management
+Core Classes:
+    - AttentionCapture: Immutable container for captured data
+    - AttentionStructure: Model attention architecture description
+    - CaptureConfig: Configuration for capture operation
 
-Functions
----------
-- load: Load model with auto-detected adapter
+Hook Utilities:
+    - AttentionHook: Hook registration and management
+    
+Note: Model adapters now live in oculi.models (explicit, not auto-detected).
 """
 
 from oculi.capture.structures import (
@@ -22,8 +20,6 @@ from oculi.capture.structures import (
     AttentionStructure,
     CaptureConfig,
 )
-from oculi.capture.adapter import ModelAdapter
-from oculi.capture.loader import load
 from oculi.capture.hooks import (
     AttentionHook,
     HookHandle,
@@ -35,8 +31,6 @@ __all__ = [
     "AttentionCapture",
     "AttentionStructure",
     "CaptureConfig",
-    "ModelAdapter",
-    "load",
     "AttentionHook",
     "HookHandle",
     "CapturedData",

@@ -1,63 +1,101 @@
 """
-LLaMA Model Adapter
-===================
+LLaMA Attention Adapter
+=======================
 
-Private implementation for LLaMA model family (LLaMA 2, LLaMA 3).
+Public adapter for LLaMA model family (LLaMA 2, LLaMA 3).
 
-Supports:
-- LLaMA 2: 7B, 13B, 70B
-- LLaMA 3: 8B, 70B (with GQA)
+This adapter provides:
+    - Explicit model loading (no magic auto-detection)
+    - Attention capture with GQA handling
+    - Hook management for interventions
+    - Generation utilities
 
-Hook Points:
-- model.layers.{layer}.self_attn.q_proj (Q projection output)
-- model.layers.{layer}.self_attn.k_proj (K projection output)
-- model.layers.{layer}.self_attn.v_proj (V projection output)
-- model.layers.{layer}.self_attn (attention output)
+Supported Models:
+    - meta-llama/Meta-Llama-3-8B (GQA: 32 Q heads, 8 KV heads)
+    - meta-llama/Meta-Llama-3-70B
+    - meta-llama/Llama-2-7b-hf (MHA: 32 Q heads, 32 KV heads)
+    - meta-llama/Llama-2-13b-hf
+    - meta-llama/Llama-2-70b-hf
+
+Usage:
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from oculi.models.llama import LlamaAttentionAdapter
+    
+    model = AutoModelForCausalLM.from_pretrained("meta-llama/Meta-Llama-3-8B")
+    tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B")
+    
+    adapter = LlamaAttentionAdapter(model, tokenizer)
+    capture = adapter.capture(input_ids)
 """
 
-from typing import Optional, Dict, List, Callable
+from typing import Optional, Dict, List, Callable, Union
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from oculi.capture.adapter import ModelAdapter, CaptureError
+from oculi.models.base import AttentionAdapter, CaptureError
 from oculi.capture.structures import (
     AttentionCapture,
     AttentionStructure,
     CaptureConfig,
 )
-from oculi.capture.loader import register_adapter
+
+# Import attention anatomy (the "where things are" documentation)
+from oculi.models.llama.attention import (
+    get_q_proj,
+    get_k_proj,
+    get_v_proj,
+    get_o_proj,
+    get_attention_module,
+    expand_kv_for_gqa,
+    create_capture_hook,
+)
 
 
-class LlamaAdapter(ModelAdapter):
+class LlamaAttentionAdapter(AttentionAdapter):
     """
-    ModelAdapter implementation for LLaMA model family.
+    Attention adapter for LLaMA model family.
     
-    Private class — instantiated via oculi.load().
+    This class wraps a pre-loaded LLaMA model and provides the Oculi
+    capture/intervention interface. You must load the model yourself
+    (no magic, no hidden state).
+    
+    Architecture (LLaMA-3-8B):
+        - 32 layers
+        - 32 query heads, 8 KV heads (GQA 4:1)
+        - 128 head dimension
+        - 4096 hidden size
+        
+    Args:
+        model: Pre-loaded LlamaForCausalLM
+        tokenizer: Pre-loaded tokenizer
+        device: Override device (default: model's device)
+        
+    Example:
+        >>> from transformers import AutoModelForCausalLM, AutoTokenizer
+        >>> model = AutoModelForCausalLM.from_pretrained("meta-llama/Meta-Llama-3-8B")
+        >>> tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B")
+        >>> adapter = LlamaAttentionAdapter(model, tokenizer)
+        >>> print(adapter.attention_structure())
+        AttentionStructure(n_query_heads=32, n_kv_heads=8, head_dim=128)
     """
     
     def __init__(
         self,
-        model_name: str,
-        device: str = "cuda",
-        dtype: torch.dtype = torch.float16,
-        **kwargs
+        model,
+        tokenizer,
+        device: Optional[str] = None,
     ):
-        self._model_name = model_name
-        self._device = torch.device(device)
-        self._dtype = dtype
+        self._model = model
+        self._tokenizer = tokenizer
         
-        # Load model and tokenizer
-        self._tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self._model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            torch_dtype=dtype,
-            device_map=device,
-            **kwargs
-        )
-        self._model.eval()
+        # Determine device from model
+        if device is not None:
+            self._device = torch.device(device)
+        else:
+            self._device = next(model.parameters()).device
         
-        # Cache architecture info
-        config = self._model.config
+        # Cache architecture info from model config
+        config = model.config
+        self._model_name = getattr(config, '_name_or_path', 'llama')
         self._n_layers = config.num_hidden_layers
         self._n_heads = config.num_attention_heads
         self._n_kv_heads = getattr(config, 'num_key_value_heads', self._n_heads)
@@ -66,6 +104,9 @@ class LlamaAdapter(ModelAdapter):
         # Hook management
         self._hooks: Dict[str, torch.utils.hooks.RemovableHandle] = {}
         self._hook_counter = 0
+        
+        # Ensure model is in eval mode
+        self._model.eval()
     
     # =========================================================================
     # ARCHITECTURE INTROSPECTION
@@ -99,6 +140,45 @@ class LlamaAdapter(ModelAdapter):
         return self._device
     
     # =========================================================================
+    # DIRECT MODEL ACCESS (for learning/debugging)
+    # =========================================================================
+    
+    @property
+    def model(self):
+        """Direct access to underlying model (for learning/debugging)."""
+        return self._model
+    
+    @property
+    def tokenizer(self):
+        """Direct access to tokenizer."""
+        return self._tokenizer
+    
+    def get_attention_module(self, layer: int):
+        """
+        Get the attention module for a layer.
+        
+        Returns: LlamaAttention (or LlamaSdpaAttention/LlamaFlashAttention2)
+        
+        Useful for understanding the exact implementation:
+            >>> attn = adapter.get_attention_module(0)
+            >>> print(type(attn))  # See which implementation is used
+            >>> print(attn.q_proj.weight.shape)  # Inspect weights
+        """
+        return get_attention_module(self._model, layer)
+    
+    def get_q_proj(self, layer: int):
+        """Get Q projection module. See models/llama/attention.py for details."""
+        return get_q_proj(self._model, layer)
+    
+    def get_k_proj(self, layer: int):
+        """Get K projection module. See models/llama/attention.py for details."""
+        return get_k_proj(self._model, layer)
+    
+    def get_v_proj(self, layer: int):
+        """Get V projection module. See models/llama/attention.py for details."""
+        return get_v_proj(self._model, layer)
+    
+    # =========================================================================
     # CAPTURE API
     # =========================================================================
     
@@ -110,13 +190,19 @@ class LlamaAdapter(ModelAdapter):
         """
         Capture attention data from a forward pass.
         
-        Implements the public ModelAdapter.capture() interface.
+        This registers temporary hooks, runs the forward pass, and 
+        assembles the captured data into an AttentionCapture.
+        
+        Args:
+            input_ids: [1, seq_len] token IDs
+            config: What to capture (default: all components, all layers)
+            
+        Returns:
+            AttentionCapture with Q, K, V, and/or attention patterns
         """
-        # Default config
         if config is None:
             config = CaptureConfig()
         
-        # Validate
         config.validate(self._n_layers)
         
         if input_ids.ndim != 2 or input_ids.shape[0] != 1:
@@ -127,7 +213,7 @@ class LlamaAdapter(ModelAdapter):
         n_tokens = input_ids.shape[1]
         layers_to_capture = config.get_layers(self._n_layers)
         
-        # Storage for captured data
+        # Storage for captured tensors
         captured_q = {}
         captured_k = {}
         captured_v = {}
@@ -137,28 +223,28 @@ class LlamaAdapter(ModelAdapter):
         handles = []
         
         for layer_idx in layers_to_capture:
-            layer = self._model.model.layers[layer_idx]
-            
             if config.capture_queries:
-                h = layer.self_attn.q_proj.register_forward_hook(
-                    self._make_capture_hook(captured_q, layer_idx, 'q')
+                hook = create_capture_hook(
+                    captured_q, layer_idx, 'q', self._n_heads, self._head_dim
                 )
+                h = get_q_proj(self._model, layer_idx).register_forward_hook(hook)
                 handles.append(h)
             
             if config.capture_keys:
-                h = layer.self_attn.k_proj.register_forward_hook(
-                    self._make_capture_hook(captured_k, layer_idx, 'k')
+                hook = create_capture_hook(
+                    captured_k, layer_idx, 'k', self._n_kv_heads, self._head_dim
                 )
+                h = get_k_proj(self._model, layer_idx).register_forward_hook(hook)
                 handles.append(h)
             
             if config.capture_values:
-                h = layer.self_attn.v_proj.register_forward_hook(
-                    self._make_capture_hook(captured_v, layer_idx, 'v')
+                hook = create_capture_hook(
+                    captured_v, layer_idx, 'v', self._n_kv_heads, self._head_dim
                 )
+                h = get_v_proj(self._model, layer_idx).register_forward_hook(hook)
                 handles.append(h)
         
         try:
-            # Forward pass
             input_ids = input_ids.to(self._device)
             with torch.no_grad():
                 outputs = self._model(
@@ -170,25 +256,23 @@ class LlamaAdapter(ModelAdapter):
             # Extract attention patterns if requested
             if config.capture_patterns and outputs.attentions is not None:
                 for layer_idx in layers_to_capture:
-                    # attentions is tuple of [batch, heads, seq, seq]
                     captured_patterns[layer_idx] = outputs.attentions[layer_idx].cpu()
-            
+        
         finally:
-            # Always remove hooks
             for h in handles:
                 h.remove()
         
         # Assemble tensors
         queries = self._assemble_tensor(
-            captured_q, layers_to_capture, self._n_heads, n_tokens, self._head_dim
+            captured_q, layers_to_capture, self._n_heads, n_tokens
         ) if config.capture_queries else None
         
         keys = self._assemble_tensor(
-            captured_k, layers_to_capture, self._n_kv_heads, n_tokens, self._head_dim
+            captured_k, layers_to_capture, self._n_kv_heads, n_tokens
         ) if config.capture_keys else None
         
         values = self._assemble_tensor(
-            captured_v, layers_to_capture, self._n_kv_heads, n_tokens, self._head_dim
+            captured_v, layers_to_capture, self._n_kv_heads, n_tokens
         ) if config.capture_values else None
         
         patterns = self._assemble_patterns(
@@ -210,49 +294,26 @@ class LlamaAdapter(ModelAdapter):
             captured_layers=tuple(layers_to_capture),
         )
     
-    def _make_capture_hook(
-        self,
-        storage: dict,
-        layer_idx: int,
-        component: str
-    ) -> Callable:
-        """Create a hook that captures output to storage."""
-        def hook(module, input, output):
-            # Output is [batch, seq, hidden]
-            # Need to reshape to [batch, seq, n_heads, head_dim]
-            batch, seq, hidden = output.shape
-            
-            if component == 'q':
-                n_heads = self._n_heads
-            else:  # k or v
-                n_heads = self._n_kv_heads
-            
-            reshaped = output.view(batch, seq, n_heads, self._head_dim)
-            storage[layer_idx] = reshaped.detach().cpu()
-        
-        return hook
-    
     def _assemble_tensor(
         self,
         storage: dict,
         layers: List[int],
         n_heads: int,
-        n_tokens: int,
-        head_dim: int
+        n_tokens: int
     ) -> torch.Tensor:
         """Assemble captured data into [L, H, T, D] tensor."""
-        result = torch.zeros(len(layers), n_heads, n_tokens, head_dim)
+        result = torch.zeros(len(layers), n_heads, n_tokens, self._head_dim)
         for i, layer_idx in enumerate(layers):
             if layer_idx in storage:
-                # storage[layer_idx] is [batch, seq, heads, dim]
-                result[i] = storage[layer_idx][0].permute(1, 0, 2)  # [heads, seq, dim] -> needs fix
+                # storage is [batch, seq, heads, dim] -> [heads, seq, dim]
+                result[i] = storage[layer_idx][0].permute(1, 0, 2)
         return result
     
     def _assemble_patterns(
         self,
         storage: dict,
         layers: List[int]
-    ) -> torch.Tensor:
+    ) -> Optional[torch.Tensor]:
         """Assemble attention patterns into [L, H, T, T] tensor."""
         if not storage:
             return None
@@ -263,7 +324,7 @@ class LlamaAdapter(ModelAdapter):
         result = torch.zeros(len(layers), n_heads, seq, seq)
         for i, layer_idx in enumerate(layers):
             if layer_idx in storage:
-                result[i] = storage[layer_idx][0]  # Remove batch dim
+                result[i] = storage[layer_idx][0]
         return result
     
     # =========================================================================
@@ -272,7 +333,7 @@ class LlamaAdapter(ModelAdapter):
     
     def generate(
         self,
-        prompt,
+        prompt: Union[str, torch.Tensor],
         max_new_tokens: int = 100,
         temperature: float = 1.0,
         do_sample: bool = True,
@@ -309,13 +370,37 @@ class LlamaAdapter(ModelAdapter):
     
     def add_hook(
         self,
-        hook_fn,
+        hook_fn: Callable,
         layer: int,
         component: str,
         stage: str = "post_proj"
     ) -> str:
-        """Add a forward hook at specified location."""
-        module = self._get_hook_module(layer, component, stage)
+        """
+        Add a forward hook at specified location.
+        
+        Components:
+            - 'q': After Q projection (model.layers[l].self_attn.q_proj)
+            - 'k': After K projection (model.layers[l].self_attn.k_proj)
+            - 'v': After V projection (model.layers[l].self_attn.v_proj)
+            - 'attn_out': After output projection (model.layers[l].self_attn.o_proj)
+            - 'pattern': Full attention module (for patterns)
+        """
+        if component == 'q':
+            module = get_q_proj(self._model, layer)
+        elif component == 'k':
+            module = get_k_proj(self._model, layer)
+        elif component == 'v':
+            module = get_v_proj(self._model, layer)
+        elif component == 'attn_out':
+            module = get_o_proj(self._model, layer)
+        elif component == 'pattern':
+            module = get_attention_module(self._model, layer)
+        else:
+            raise ValueError(
+                f"Unknown component: {component}. "
+                f"Must be one of: 'q', 'k', 'v', 'attn_out', 'pattern'"
+            )
+        
         handle = module.register_forward_hook(hook_fn)
         
         handle_id = f"hook_{self._hook_counter}"
@@ -333,30 +418,3 @@ class LlamaAdapter(ModelAdapter):
         for handle in self._hooks.values():
             handle.remove()
         self._hooks.clear()
-    
-    def _get_hook_module(
-        self,
-        layer: int,
-        component: str,
-        stage: str
-    ):
-        """Get the module to hook based on component and stage."""
-        layer_module = self._model.model.layers[layer]
-        
-        if component == 'q':
-            return layer_module.self_attn.q_proj
-        elif component == 'k':
-            return layer_module.self_attn.k_proj
-        elif component == 'v':
-            return layer_module.self_attn.v_proj
-        elif component == 'attn_out':
-            return layer_module.self_attn.o_proj
-        elif component == 'pattern':
-            return layer_module.self_attn
-        else:
-            raise ValueError(f"Unknown component: {component}")
-
-
-# Register this adapter with the loader
-register_adapter("meta-llama/*", LlamaAdapter)
-register_adapter("Meta-Llama/*", LlamaAdapter)
