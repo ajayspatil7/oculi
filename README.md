@@ -1,241 +1,153 @@
-# Spectra: Attention Metrics Data Capture
+# Oculi
 
-## Objective
+> **A low-level, surgical instrumentation layer for LLMs**
 
-Capture detailed per-token attention metrics from Llama-3-8B to understand attention patterns in large language models.
+[![Version](https://img.shields.io/badge/version-0.1.0-blue)]()
+[![Python](https://img.shields.io/badge/python-3.10+-green)]()
+[![License](https://img.shields.io/badge/license-MIT-lightgrey)]()
+
+---
+
+## What is Oculi?
+
+Oculi is a **research-first** mechanistic interpretability toolkit for transformer language models. It provides:
+
+- **Token-level QKV capture** with pre/post-RoPE options
+- **Attention entropy computation** with causal masking
+- **Surgical interventions** via Q/K scaling (the Spectra method)
+- **Model-agnostic design** (LLaMA, Mistral, Qwen, Falcon)
+
+---
+
+## Installation
+
+```bash
+# From source
+git clone https://github.com/ajayspatil7/oculi.git
+cd oculi
+pip install -e .
+
+# With visualization support
+pip install -e ".[viz]"
+
+# With dev tools
+pip install -e ".[all]"
+```
 
 ---
 
 ## Quick Start
 
-```bash
-# Clone and setup
-git clone https://github.com/ajayspatil7/spectra.git
-cd spectra
-pip install -r requirements.txt
+```python
+import oculi
 
-# Download and preprocess data
-python scripts/preprocess_data.py --n-samples 50000 --output-dir data/processed
+# Load model (auto-detects architecture)
+model = oculi.load("meta-llama/Meta-Llama-3-8B")
 
-# Capture metrics (64 samples → ~768 MB CSV)
-python scripts/run_experiment.py --context-length 512 --n-samples 64
+# Capture attention data
+capture = model.capture(input_ids)
 
-# View configuration details
-python scripts/show_experiment_config.py
+# Compute metrics
+entropy = oculi.analysis.EntropyAnalysis.token_entropy(capture)
+q_norms = oculi.analysis.NormAnalysis.q_norms(capture)
+
+print(f"Entropy shape: {entropy.shape}")  # [L, H, T]
+print(f"Q norms shape: {q_norms.shape}")  # [L, H, T]
 ```
 
----
-
-## Metrics Captured
-
-For each **token** in each **head** of each **layer**:
-
-| Metric               | Symbol | Description                                   |
-| -------------------- | ------ | --------------------------------------------- |
-| Query Norm           | ‖Q‖    | L2 norm of query vector                       |
-| Attention Entropy    | H      | Information entropy of attention distribution |
-| Max Attention Weight | α_max  | Peak attention weight assigned                |
-| Effective Span       | k_eff  | Min keys needed for 90% attention mass        |
-
----
-
-## Experimental Configuration
-
-| Parameter              | Value                                 |
-| ---------------------- | ------------------------------------- |
-| **Model**              | meta-llama/Meta-Llama-3-8B            |
-| **Precision**          | float16                               |
-| **Context Length**     | 512 tokens                            |
-| **Architecture**       | 32 layers, 32 heads (GQA: 8 KV heads) |
-| **Attention Analysis** | Pre-RoPE (position-agnostic)          |
-| **GPU Requirement**    | CUDA (≥16 GB VRAM)                    |
-
----
-
-## Output Format
-
-**CSV File:** `results/attention_metrics_{timestamp}.csv`
-
-**Columns:**
-
-- `sample_id`, `layer`, `head`, `token_pos`
-- `query_norm`, `entropy`, `max_attn`, `k_eff`
-
-**Size for 64 samples:**
-
-- Rows: **33,554,432**
-- File size: **~768 MB**
-
----
-
-## Project Structure
-
-```
-Spectra/
-├── src/
-│   ├── config.py           # Experiment configuration
-│   ├── hooks.py            # AttentionProfiler (captures Q/K/V)
-│   ├── metrics.py          # Metric computations
-│   └── data_loader.py      # Data loading from shards
-├── scripts/
-│   ├── run_experiment.py   # Main capture script
-│   ├── preprocess_data.py  # SlimPajama-6B preprocessing
-│   ├── explore_npz.py      # Shard exploration tool
-│   └── show_experiment_config.py  # Configuration display
-├── data/
-│   ├── raw/                # Downloaded dataset
-│   └── processed/          # .npz token shards
-└── results/                # CSV output files
-```
-
----
-
-## Key Design Decisions
-
-### Pre-RoPE Analysis
-
-Query and Key vectors are captured **before** Rotary Position Embedding (RoPE) is applied. This analyzes the **intrinsic geometry** of queries in position-agnostic space.
-
-**Rationale:**
-
-- RoPE is a rotation (preserves norms)
-- Isolates semantic vs positional components
-- ‖Q_before_RoPE‖ = ‖Q_after_RoPE‖
-
-### Manual Attention Recomputation
-
-We compute `attention = softmax(Q @ K^T / sqrt(d))` manually rather than using FlashAttention.
-
-**Rationale:**
-
-- FlashAttention doesn't expose intermediate attention weights
-- Ensures consistency between Q norms and attention probabilities
-- Full control over causal masking
-
-### Metrics Definition
-
-**Query Norm (‖Q‖):**
-
-```
-‖Q‖ = sqrt(Σ Q_i²)  (L2 norm along head dimension)
-```
-
-**Attention Entropy (H):**
-
-```
-H = -Σ p_i · log(p_i)  (Shannon entropy over valid attention weights)
-```
-
-**Effective Span (k_eff):**
-
-```
-k_eff = argmin_k { Σ(top-k weights) ≥ 0.9 }
-```
-
----
-
-## Data Source
-
-**Dataset:** SlimPajama-6B (test split)
-
-**Filtered Sources:**
-
-- CommonCrawl (general web)
-- C4 (cleaned web text)
-- Wikipedia (encyclopedic)
-- StackExchange (Q&A)
-
-**Excluded:** GitHub (code), ArXiv (papers), Books
-
-**Preprocessing:**
-
-- 512-token fixed-length chunks
-- Non-overlapping (no padding)
-- Llama-3-8B tokenizer
-
----
-
-## Environment Setup
-
-### Prerequisites
-
-- **GPU:** NVIDIA with ≥16 GB VRAM (A10G recommended)
-- **CUDA:** 12.1+
-- **Python:** 3.10+
-
-### Installation
-
-```bash
-conda create -n spectra python=3.10 -y
-conda activate spectra
-pip install torch --index-url https://download.pytorch.org/whl/cu121
-pip install -r requirements.txt
-```
-
-### Verify Setup
+### Intervention Example
 
 ```python
-import torch
-print(f"CUDA Available: {torch.cuda.is_available()}")
-print(f"GPU: {torch.cuda.get_device_name(0)}")
+from oculi.intervention import SpectraScaler, InterventionContext
+
+# Define intervention: sharpen attention at layer 23, head 5
+scaler = SpectraScaler(layer=23, head=5, alpha=1.5)
+
+# Apply and generate
+with InterventionContext(model, [scaler]):
+    output = model.generate("The answer is")
 ```
 
 ---
 
-## Running on AWS SageMaker
+## Core Concepts
 
-```bash
-# Launch ml.g5.xlarge instance (or higher)
-git clone https://github.com/ajayspatil7/spectra.git
-cd spectra
-pip install -r requirements.txt
+### Capture
 
-# Preprocess data (one-time, ~5 min)
-python scripts/preprocess_data.py --n-samples 50000
+```python
+from oculi import CaptureConfig
 
-# Capture metrics (~15-20 min for 64 samples)
-python scripts/run_experiment.py --n-samples 64
+# Capture specific layers and components
+config = CaptureConfig(
+    layers=[20, 21, 22],       # Only capture these layers
+    capture_patterns=True,      # Attention patterns
+    capture_queries=True,       # Q vectors
+    qk_stage='pre_rope'         # Before positional encoding
+)
+
+capture = model.capture(input_ids, config=config)
+```
+
+### Analysis
+
+All analysis functions are **pure**: `AttentionCapture → Tensor`
+
+```python
+from oculi.analysis import (
+    NormAnalysis,      # q_norms, k_norms, v_norms
+    EntropyAnalysis,   # token_entropy, delta_entropy
+    AttentionAnalysis, # max_weight, effective_span
+    CorrelationAnalysis # pearson, norm_entropy_correlation
+)
+```
+
+### Intervention
+
+```python
+from oculi.intervention import (
+    QScaler,        # Scale Q by α
+    KScaler,        # Scale K by α
+    SpectraScaler,  # Scale both Q,K by √α (net effect: α on logits)
+    HeadAblation,   # Zero out head
+)
 ```
 
 ---
 
-## Usage Examples
+## Supported Models
 
-### Full Pipeline
-
-```bash
-# 1. Preprocess 50K samples
-python scripts/preprocess_data.py --n-samples 50000
-
-# 2. Capture metrics from 64 samples
-python scripts/run_experiment.py --n-samples 64
-
-# 3. View configuration
-python scripts/show_experiment_config.py
-
-# 4. Explore output
-python scripts/explore_npz.py data/processed/shard_00000.npz
-```
-
-### Custom Configuration
-
-```bash
-# Different sample count
-python scripts/run_experiment.py --n-samples 128
-
-# Different context length (must match preprocessing)
-python scripts/run_experiment.py --context-length 512 --n-samples 50
-```
+| Model      | Adapter          | Attention | Status |
+| ---------- | ---------------- | --------- | ------ |
+| LLaMA 2/3  | `LlamaAdapter`   | GQA       | ✅     |
+| Mistral    | `MistralAdapter` | GQA       | 🔄     |
+| Qwen 2/2.5 | `QwenAdapter`    | GQA       | 🔄     |
+| Falcon     | `FalconAdapter`  | MQA       | 🔄     |
 
 ---
 
-## Expected Runtime (A10G GPU)
+## Documentation
 
-| Operation                    | Time           |
-| ---------------------------- | -------------- |
-| Preprocessing (50K samples)  | ~5 minutes     |
-| Metrics capture (64 samples) | ~15-20 minutes |
-| Per sample processing        | ~15-20 seconds |
+- [API Contract](docs/API_CONTRACT.md) — Tensor shapes, math definitions, guarantees
+
+---
+
+## Architecture
+
+```
+oculi/
+├── capture/        # Core data structures & model interface
+├── analysis/       # Pure analysis functions
+├── intervention/   # Intervention definitions
+├── visualize/      # Research-quality plots
+├── _private/       # Implementation details (adapters, hooks)
+└── __init__.py     # Public API exports
+```
+
+**Design Principles:**
+
+1. **Public/Private Separation** — Public API is versioned, private can change
+2. **No PyTorch in Public** — Researchers cite semantics, not hooks
+3. **Pure Functional Analysis** — Stateless, deterministic, testable
 
 ---
 
@@ -243,8 +155,6 @@ python scripts/run_experiment.py --context-length 512 --n-samples 50
 
 MIT
 
----
-
 ## Author
 
-Ajay S Patil
+**Ajay S Patil**

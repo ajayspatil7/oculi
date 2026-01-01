@@ -46,20 +46,6 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 
-# Translations
-*.mo
-*.pot
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# pyenv
-.python-version
-
 # Environments
 .env
 .venv
@@ -69,72 +55,26 @@ ENV/
 env.bak/
 venv.bak/
 
-# Dir
-/CLOUD/
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
-
-# OS
 .DS_Store
-Thumbs.db
 
-# Project specific
-data/raw/
-data/processed/
-data/slimpajama/     # SlimPajama-6B cache (~20GB)
-data/ctx*/           # Context-specific samples
-outputs/
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Model weights and data
+*.bin
 *.pt
 *.pth
-*.bin
 *.safetensors
-wandb/
+data/
+models/
+
+# Logs
+*.log
 logs/
-checkpoints/
-
-# Large files (model weights, etc.)
-*.gguf
-*.ggml
-
-# SageMaker specific
-.sagemaker/
-*.tar.gz
-
-# Models
-*.pkl
-
-# =============================================
-# EXPERIMENT RESULTS - TRACKED FOR SYNC
-# =============================================
-# We DO track:
-#   - .csv files (experiment results)
-#   - .png/.jpg files (plots)
-#   - notebooks/gain/
-#   - notebooks/key-scaling/
-#   - results/intervention/
-#
-# This allows cloud->local sync of experiment outputs.
-# =============================================
