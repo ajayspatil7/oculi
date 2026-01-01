@@ -2,7 +2,7 @@
 
 > **A low-level, surgical instrumentation layer for LLMs**
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue)]()
+[![Version](https://img.shields.io/badge/version-0.2.0-blue)]()
 [![Python](https://img.shields.io/badge/python-3.10+-green)]()
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
@@ -15,7 +15,7 @@ Oculi is a **research-first** mechanistic interpretability toolkit for transform
 - **Token-level QKV capture** with pre/post-RoPE options
 - **Attention entropy computation** with causal masking
 - **Surgical interventions** via Q/K scaling (the Spectra method)
-- **Model-agnostic design** (LLaMA, Mistral, Qwen, Falcon)
+- **Learning-first design** — adapters are _executable documentation_ of model internals
 
 ---
 
@@ -39,33 +39,48 @@ pip install -e ".[all]"
 ## Quick Start
 
 ```python
-import oculi
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from oculi.models.llama import LlamaAttentionAdapter
 
-# Load model (auto-detects architecture)
-model = oculi.load("meta-llama/Meta-Llama-3-8B")
+# Load model explicitly (no magic)
+model = AutoModelForCausalLM.from_pretrained("meta-llama/Meta-Llama-3-8B")
+tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B")
+
+# Create adapter
+adapter = LlamaAttentionAdapter(model, tokenizer)
 
 # Capture attention data
-capture = model.capture(input_ids)
+input_ids = tokenizer.encode("Hello world", return_tensors="pt")
+capture = adapter.capture(input_ids)
 
-# Compute metrics
-entropy = oculi.analysis.EntropyAnalysis.token_entropy(capture)
-q_norms = oculi.analysis.NormAnalysis.q_norms(capture)
-
-print(f"Entropy shape: {entropy.shape}")  # [L, H, T]
-print(f"Q norms shape: {q_norms.shape}")  # [L, H, T]
+print(f"Queries: {capture.queries.shape}")   # [L, H, T, D]
+print(f"Patterns: {capture.patterns.shape}") # [L, H, T, T]
 ```
 
-### Intervention Example
+### Analysis Example
 
 ```python
-from oculi.intervention import SpectraScaler, InterventionContext
+from oculi.analysis import EntropyAnalysis, NormAnalysis
 
-# Define intervention: sharpen attention at layer 23, head 5
-scaler = SpectraScaler(layer=23, head=5, alpha=1.5)
+# Compute metrics
+entropy_analyzer = EntropyAnalysis(capture)
+entropy = entropy_analyzer.compute()
+print(f"Entropy: {entropy.results.shape}")  # [L, H, T]
 
-# Apply and generate
-with InterventionContext(model, [scaler]):
-    output = model.generate("The answer is")
+# Query norms
+norm_analyzer = NormAnalysis(capture)
+q_norms = norm_analyzer.compute_query_norms()
+print(f"Q norms: {q_norms.shape}")  # [L, H, T]
+```
+
+### Testing Without GPU
+
+```python
+# Use mock model for CPU testing
+from tests.mocks import MockLlamaAdapter
+
+adapter = MockLlamaAdapter()  # Tiny LLaMA-like model
+capture = adapter.capture(adapter.tokenize("Test input"))
 ```
 
 ---
@@ -85,7 +100,7 @@ config = CaptureConfig(
     qk_stage='pre_rope'         # Before positional encoding
 )
 
-capture = model.capture(input_ids, config=config)
+capture = adapter.capture(input_ids, config=config)
 ```
 
 ### Analysis
@@ -94,10 +109,9 @@ All analysis functions are **pure**: `AttentionCapture → Tensor`
 
 ```python
 from oculi.analysis import (
-    NormAnalysis,      # q_norms, k_norms, v_norms
-    EntropyAnalysis,   # token_entropy, delta_entropy
-    AttentionAnalysis, # max_weight, effective_span
-    CorrelationAnalysis # pearson, norm_entropy_correlation
+    NormAnalysis,       # q_norms, k_norms, v_norms
+    EntropyAnalysis,    # token_entropy, delta_entropy
+    CorrelationAnalysis # pearson, spearman with p-values
 )
 ```
 
@@ -107,7 +121,6 @@ from oculi.analysis import (
 from oculi.intervention import (
     QScaler,        # Scale Q by α
     KScaler,        # Scale K by α
-    SpectraScaler,  # Scale both Q,K by √α (net effect: α on logits)
     HeadAblation,   # Zero out head
 )
 ```
@@ -116,18 +129,11 @@ from oculi.intervention import (
 
 ## Supported Models
 
-| Model      | Adapter          | Attention | Status |
-| ---------- | ---------------- | --------- | ------ |
-| LLaMA 2/3  | `LlamaAdapter`   | GQA       | ✅     |
-| Mistral    | `MistralAdapter` | GQA       | 🔄     |
-| Qwen 2/2.5 | `QwenAdapter`    | GQA       | 🔄     |
-| Falcon     | `FalconAdapter`  | MQA       | 🔄     |
-
----
-
-## Documentation
-
-- [API Contract](docs/API_CONTRACT.md) — Tensor shapes, math definitions, guarantees
+| Model      | Adapter                 | Attention | Status |
+| ---------- | ----------------------- | --------- | ------ |
+| LLaMA 2/3  | `LlamaAttentionAdapter` | GQA       | ✅     |
+| Mistral    | Coming soon             | GQA       | 🔄     |
+| Qwen 2/2.5 | Coming soon             | GQA       | 🔄     |
 
 ---
 
@@ -135,19 +141,32 @@ from oculi.intervention import (
 
 ```
 oculi/
-├── capture/        # Core data structures & model interface
-├── analysis/       # Pure analysis functions
-├── intervention/   # Intervention definitions
-├── visualize/      # Research-quality plots
-├── _private/       # Implementation details (adapters, hooks)
-└── __init__.py     # Public API exports
+├── models/          # 🔥 PUBLIC model adapters
+│   ├── base.py      # AttentionAdapter contract
+│   └── llama/       # LLaMA family
+│       ├── adapter.py   # LlamaAttentionAdapter
+│       ├── attention.py # Q/K/V extraction, GQA, RoPE
+│       └── notes.md     # Architecture documentation
+│
+├── capture/         # Capture utilities & data structures
+├── analysis/        # Pure analysis functions
+├── intervention/    # Intervention definitions
+└── visualize/       # Research-quality plots
 ```
 
 **Design Principles:**
 
-1. **Public/Private Separation** — Public API is versioned, private can change
-2. **No PyTorch in Public** — Researchers cite semantics, not hooks
-3. **Pure Functional Analysis** — Stateless, deterministic, testable
+1. **Learning-First** — Adapters are _executable documentation_, not hidden glue
+2. **Explicit Imports** — No magic auto-detection, you choose the model
+3. **Public Model Anatomy** — See exactly where Q/K/V live in `attention.py`
+4. **Pure Functional Analysis** — Stateless, deterministic, testable
+
+---
+
+## Documentation
+
+- [API Contract](docs/API_CONTRACT.md) — Tensor shapes, math definitions, guarantees
+- [LLaMA Notes](oculi/models/llama/notes.md) — GQA, RoPE, architecture details
 
 ---
 
