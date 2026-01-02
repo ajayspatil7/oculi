@@ -43,7 +43,12 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from oculi.models.llama import LlamaAttentionAdapter
 
 # Load model explicitly (no magic)
-model = AutoModelForCausalLM.from_pretrained("meta-llama/Meta-Llama-3-8B")
+model = AutoModelForCausalLM.from_pretrained(
+    "meta-llama/Meta-Llama-3-8B",
+    low_cpu_mem_usage=True,
+    device_map="auto",
+    torch_dtype="auto",
+)
 tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B")
 
 # Create adapter
