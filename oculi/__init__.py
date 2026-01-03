@@ -13,6 +13,10 @@ Data Structures:
     - AttentionCapture: Captured attention data
     - AttentionStructure: Model architecture info
     - CaptureConfig: Capture configuration
+    - ResidualCapture: Residual stream activations
+    - MLPCapture: MLP internals
+    - LogitCapture: Layer-wise logits
+    - FullCapture: Combined capture container
 
 Modules:
     - oculi.models: Model-specific adapters
@@ -31,10 +35,10 @@ Example
     adapter = LlamaAttentionAdapter(model, tokenizer)
     capture = adapter.capture(input_ids)
 
-Version: 0.2.0-dev
+Version: 0.3.0-dev
 """
 
-__version__ = "0.2.0-dev"
+__version__ = "0.3.0-dev"
 __author__ = "Ajay S Patil"
 
 # =============================================================================
@@ -45,6 +49,13 @@ from oculi.capture.structures import (
     AttentionCapture,
     AttentionStructure,
     CaptureConfig,
+    ResidualCapture,
+    ResidualConfig,
+    MLPCapture,
+    MLPConfig,
+    LogitCapture,
+    LogitConfig,
+    FullCapture,
 )
 
 # Base adapter contract
@@ -76,6 +87,15 @@ __all__ = [
     "AttentionStructure", 
     "CaptureConfig",
     
+    # Phase 1 structures
+    "ResidualCapture",
+    "ResidualConfig",
+    "MLPCapture",
+    "MLPConfig",
+    "LogitCapture",
+    "LogitConfig",
+    "FullCapture",
+    
     # Base adapter
     "AttentionAdapter",
     "UnsupportedModelError",
@@ -87,3 +107,4 @@ __all__ = [
     "intervention",
     "capture",
 ]
+

@@ -17,7 +17,8 @@ Changes to this package do NOT trigger version bumps
 (unless they affect public API behavior).
 """
 
-# Import adapters to trigger registration with loader
-from oculi._private import adapters
+# Note: adapters have been moved to oculi.models
+# Hooks are in oculi._private.hooks
 
 __all__ = []  # Nothing exported publicly
+

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oculi"
-version = "0.1.0"
-description = "A low-level, surgical instrumentation layer for LLMs"
+version = "0.3.0-dev"
+description = "Comprehensive mechanistic interpretability toolkit for transformer LLMs"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
@@ -27,7 +27,11 @@ keywords = [
     "transformers",
     "attention",
     "llm",
-    "pytorch"
+    "pytorch",
+    "circuit-detection",
+    "logit-lens",
+    "residual-stream",
+    "mlp-analysis"
 ]
 
 dependencies = [

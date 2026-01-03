@@ -20,6 +20,8 @@ Classes
 - AttentionAnalysis: Pattern-based metrics
 - CorrelationAnalysis: Statistical analysis with p-values
 - StratifiedView: Layer/head/token slicing helpers
+- LogitLensAnalysis: Layer-by-layer prediction analysis
+- CircuitDetection: Canonical circuit pattern detection
 """
 
 from oculi.analysis.norms import NormAnalysis
@@ -31,6 +33,8 @@ from oculi.analysis.stratified import (
     StratifiedResult,
     find_extreme_heads,
 )
+from oculi.analysis.logit_lens import LogitLensAnalysis
+from oculi.analysis.circuits import CircuitDetection
 
 __all__ = [
     "NormAnalysis",
@@ -40,4 +44,7 @@ __all__ = [
     "StratifiedView",
     "StratifiedResult",
     "find_extreme_heads",
+    "LogitLensAnalysis",
+    "CircuitDetection",
 ]
+

@@ -36,6 +36,13 @@ from oculi.capture.structures import (
     AttentionCapture,
     AttentionStructure,
     CaptureConfig,
+    ResidualConfig,
+    ResidualCapture,
+    MLPConfig,
+    MLPCapture,
+    LogitConfig,
+    LogitCapture,
+    FullCapture,
 )
 
 # Import attention anatomy (the "where things are" documentation)
@@ -193,6 +200,10 @@ class LlamaAttentionAdapter(AttentionAdapter):
         This registers temporary hooks, runs the forward pass, and 
         assembles the captured data into an AttentionCapture.
         
+        Note: For models using SDPA/FlashAttention, attention patterns
+        are computed manually from Q and K vectors since those backends
+        don't return attention weights.
+        
         Args:
             input_ids: [1, seq_len] token IDs
             config: What to capture (default: all components, all layers)
@@ -219,18 +230,22 @@ class LlamaAttentionAdapter(AttentionAdapter):
         captured_v = {}
         captured_patterns = {}
         
+        # For pattern capture, we ALWAYS need Q and K (will compute patterns manually)
+        need_q_for_patterns = config.capture_patterns
+        need_k_for_patterns = config.capture_patterns
+        
         # Register hooks
         handles = []
         
         for layer_idx in layers_to_capture:
-            if config.capture_queries:
+            if config.capture_queries or need_q_for_patterns:
                 hook = create_capture_hook(
                     captured_q, layer_idx, 'q', self._n_heads, self._head_dim
                 )
                 h = get_q_proj(self._model, layer_idx).register_forward_hook(hook)
                 handles.append(h)
             
-            if config.capture_keys:
+            if config.capture_keys or need_k_for_patterns:
                 hook = create_capture_hook(
                     captured_k, layer_idx, 'k', self._n_kv_heads, self._head_dim
                 )
@@ -249,14 +264,23 @@ class LlamaAttentionAdapter(AttentionAdapter):
             with torch.no_grad():
                 outputs = self._model(
                     input_ids,
-                    output_attentions=config.capture_patterns,
+                    output_attentions=config.capture_patterns,  # Try to get native patterns
                     return_dict=True
                 )
             
-            # Extract attention patterns if requested
-            if config.capture_patterns and outputs.attentions is not None:
-                for layer_idx in layers_to_capture:
-                    captured_patterns[layer_idx] = outputs.attentions[layer_idx].cpu()
+            # Check if we got attention patterns from the model
+            native_patterns = outputs.attentions is not None
+            
+            if config.capture_patterns:
+                if native_patterns:
+                    # Model returned patterns (eager attention mode)
+                    for layer_idx in layers_to_capture:
+                        captured_patterns[layer_idx] = outputs.attentions[layer_idx].cpu()
+                else:
+                    # SDPA/FlashAttention - compute patterns manually from Q and K
+                    captured_patterns = self._compute_attention_patterns(
+                        captured_q, captured_k, layers_to_capture, n_tokens
+                    )
         
         finally:
             for h in handles:
@@ -294,6 +318,58 @@ class LlamaAttentionAdapter(AttentionAdapter):
             captured_layers=tuple(layers_to_capture),
         )
     
+    def _compute_attention_patterns(
+        self,
+        captured_q: dict,
+        captured_k: dict,
+        layers: List[int],
+        n_tokens: int
+    ) -> dict:
+        """
+        Compute attention patterns manually from Q and K.
+        
+        This is needed for SDPA/FlashAttention which don't return attention weights.
+        
+        Formula:
+            attn = softmax(Q @ K^T / sqrt(head_dim)) with causal mask
+        """
+        patterns = {}
+        scale = self._head_dim ** -0.5
+        
+        for layer_idx in layers:
+            if layer_idx not in captured_q or layer_idx not in captured_k:
+                continue
+            
+            # captured_q[layer_idx]: [batch, seq, n_heads, head_dim]
+            q = captured_q[layer_idx].float()  # [1, T, H_q, D]
+            k = captured_k[layer_idx].float()  # [1, T, H_kv, D]
+            
+            # Expand K for GQA: [1, T, H_kv, D] -> [1, T, H_q, D]
+            if self._n_kv_heads != self._n_heads:
+                k = expand_kv_for_gqa(k, self._n_heads, self._n_kv_heads)
+            
+            # Transpose to [1, H, T, D]
+            q = q.permute(0, 2, 1, 3)  # [1, H, T, D]
+            k = k.permute(0, 2, 1, 3)  # [1, H, T, D]
+            
+            # Compute attention scores: [1, H, T, T]
+            scores = torch.matmul(q, k.transpose(-2, -1)) * scale
+            
+            # Apply causal mask
+            causal_mask = torch.triu(
+                torch.ones(n_tokens, n_tokens, device=scores.device, dtype=torch.bool),
+                diagonal=1
+            )
+            scores.masked_fill_(causal_mask, float('-inf'))
+            
+            # Softmax
+            attn_probs = torch.softmax(scores, dim=-1)
+            
+            # Store [1, H, T, T]
+            patterns[layer_idx] = attn_probs.cpu()
+        
+        return patterns
+    
     def _assemble_tensor(
         self,
         storage: dict,
@@ -326,6 +402,480 @@ class LlamaAttentionAdapter(AttentionAdapter):
             if layer_idx in storage:
                 result[i] = storage[layer_idx][0]
         return result
+    
+    # =========================================================================
+    # RESIDUAL STREAM CAPTURE API
+    # =========================================================================
+    
+    def capture_residual(
+        self,
+        input_ids: torch.Tensor,
+        config: Optional[ResidualConfig] = None
+    ) -> ResidualCapture:
+        """
+        Capture residual stream activations during forward pass.
+        
+        Captures hidden states at four key points in each transformer block:
+        - pre_attn: Block input (before input_layernorm)
+        - post_attn: After attention (before residual add)
+        - pre_mlp: After post_attention_layernorm (before MLP)
+        - post_mlp: After MLP (before final residual add)
+        
+        Args:
+            input_ids: [1, seq_len] token IDs
+            config: What to capture (default: all positions, all layers)
+            
+        Returns:
+            ResidualCapture with tensors of shape [L, T, H]
+            
+        Example:
+            >>> residual = adapter.capture_residual(input_ids)
+            >>> print(residual.pre_attn.shape)  # [32, 512, 4096]
+            >>> layer_10 = residual.get_layer(10)
+        """
+        from oculi._private.hooks.residual import (
+            register_residual_hooks,
+            assemble_residual_capture,
+        )
+        
+        if config is None:
+            config = ResidualConfig()
+        
+        config.validate(self._n_layers)
+        
+        if input_ids.ndim != 2 or input_ids.shape[0] != 1:
+            raise ValueError(
+                f"input_ids must be shape [1, seq_len], got {input_ids.shape}"
+            )
+        
+        n_tokens = input_ids.shape[1]
+        layers_to_capture = config.get_layers(self._n_layers)
+        hidden_dim = self._model.config.hidden_size
+        
+        # Storage for captured tensors
+        storage = {
+            'pre_attn': {},
+            'post_attn': {},
+            'pre_mlp': {},
+            'post_mlp': {},
+        }
+        
+        # Register hooks
+        handles = register_residual_hooks(
+            self._model,
+            layers_to_capture,
+            storage,
+            capture_pre_attn=config.capture_pre_attn,
+            capture_post_attn=config.capture_post_attn,
+            capture_pre_mlp=config.capture_pre_mlp,
+            capture_post_mlp=config.capture_post_mlp,
+            dtype=config.storage_dtype,
+        )
+        
+        try:
+            input_ids = input_ids.to(self._device)
+            with torch.no_grad():
+                self._model(input_ids, return_dict=True)
+        finally:
+            for h in handles:
+                h.remove()
+        
+        return assemble_residual_capture(
+            storage,
+            layers_to_capture,
+            n_tokens,
+            hidden_dim,
+            self._model_name,
+        )
+    
+    # =========================================================================
+    # MLP CAPTURE API
+    # =========================================================================
+    
+    def capture_mlp(
+        self,
+        input_ids: torch.Tensor,
+        config: Optional[MLPConfig] = None
+    ) -> MLPCapture:
+        """
+        Capture MLP internals during forward pass.
+        
+        Captures:
+        - pre_activation: Gate projection output (before SiLU)
+        - post_activation: silu(gate) * up ("neuron activations")
+        - gate_output: Gate projection output (optional)
+        - mlp_output: Final MLP output
+        
+        Args:
+            input_ids: [1, seq_len] token IDs
+            config: What to capture (default: all except gate)
+            
+        Returns:
+            MLPCapture with tensors of shape [L, T, I] or [L, T, H]
+        """
+        from oculi._private.hooks.mlp import (
+            register_mlp_hooks,
+            assemble_mlp_capture,
+        )
+        
+        if config is None:
+            config = MLPConfig()
+        
+        config.validate(self._n_layers)
+        
+        if input_ids.ndim != 2 or input_ids.shape[0] != 1:
+            raise ValueError(
+                f"input_ids must be shape [1, seq_len], got {input_ids.shape}"
+            )
+        
+        n_tokens = input_ids.shape[1]
+        layers_to_capture = config.get_layers(self._n_layers)
+        hidden_dim = self._model.config.hidden_size
+        intermediate_dim = self._model.config.intermediate_size
+        
+        storage = {
+            'pre_activation': {},
+            'post_activation': {},
+            'gate': {},
+            'output': {},
+        }
+        
+        handles = register_mlp_hooks(
+            self._model,
+            layers_to_capture,
+            storage,
+            capture_pre_activation=config.capture_pre_activation,
+            capture_post_activation=config.capture_post_activation,
+            capture_gate=config.capture_gate,
+            capture_output=config.capture_output,
+            dtype=config.storage_dtype,
+        )
+        
+        try:
+            input_ids = input_ids.to(self._device)
+            with torch.no_grad():
+                self._model(input_ids, return_dict=True)
+        finally:
+            for h in handles:
+                h.remove()
+        
+        return assemble_mlp_capture(
+            storage,
+            layers_to_capture,
+            n_tokens,
+            hidden_dim,
+            intermediate_dim,
+            self._model_name,
+        )
+    
+    # =========================================================================
+    # LOGIT CAPTURE API (Logit Lens)
+    # =========================================================================
+    
+    def capture_logits(
+        self,
+        input_ids: torch.Tensor,
+        config: Optional[LogitConfig] = None
+    ) -> LogitCapture:
+        """
+        Capture layer-wise logits for logit lens analysis.
+        
+        Applies the unembedding matrix to each layer's residual stream:
+        logits[l] = layer_norm(residual[l]) @ lm_head.weight.T
+        
+        Args:
+            input_ids: [1, seq_len] token IDs
+            config: Configuration (top_k for memory efficiency)
+            
+        Returns:
+            LogitCapture with logits or top-k logits
+            
+        Warning:
+            Full logits for large models can be very memory-intensive.
+            Use config.top_k for practical analysis.
+        """
+        if config is None:
+            config = LogitConfig()
+        
+        config.validate(self._n_layers)
+        
+        if input_ids.ndim != 2 or input_ids.shape[0] != 1:
+            raise ValueError(
+                f"input_ids must be shape [1, seq_len], got {input_ids.shape}"
+            )
+        
+        # First capture residual post_mlp (the residual stream at each layer)
+        residual_config = ResidualConfig(
+            capture_pre_attn=False,
+            capture_post_attn=False,
+            capture_pre_mlp=False,
+            capture_post_mlp=True,
+            layers=config.layers,
+            storage_dtype=config.storage_dtype,
+        )
+        
+        residual = self.capture_residual(input_ids, residual_config)
+        
+        n_tokens = input_ids.shape[1]
+        layers_to_capture = config.get_layers(self._n_layers)
+        vocab_size = self._model.config.vocab_size
+        
+        # Get unembedding matrix and final layer norm
+        lm_head = self._model.lm_head
+        final_norm = self._model.model.norm
+        
+        # Compute logits at each layer
+        with torch.no_grad():
+            # residual.post_mlp: [L, T, H]
+            post_mlp = residual.post_mlp.to(self._device)  # Move to device
+            
+            # Apply layer norm and compute logits
+            # Note: We apply the final layer norm to approximate what the
+            # model would predict at that layer
+            normalized = final_norm(post_mlp)  # [L, T, H]
+            all_logits = normalized @ lm_head.weight.T  # [L, T, V]
+            all_logits = all_logits.to(config.storage_dtype).cpu()
+        
+        if config.top_k is not None:
+            # Only store top-k
+            top_k_logits, top_k_indices = torch.topk(all_logits, config.top_k, dim=-1)
+            return LogitCapture(
+                logits=None,
+                top_k_logits=top_k_logits,
+                top_k_indices=top_k_indices,
+                n_layers=len(layers_to_capture),
+                n_tokens=n_tokens,
+                vocab_size=vocab_size,
+                model_name=self._model_name,
+                captured_layers=tuple(layers_to_capture),
+            )
+        else:
+            return LogitCapture(
+                logits=all_logits,
+                top_k_logits=None,
+                top_k_indices=None,
+                n_layers=len(layers_to_capture),
+                n_tokens=n_tokens,
+                vocab_size=vocab_size,
+                model_name=self._model_name,
+                captured_layers=tuple(layers_to_capture),
+            )
+    
+    # =========================================================================
+    # FULL CAPTURE API
+    # =========================================================================
+    
+    def capture_full(
+        self,
+        input_ids: torch.Tensor,
+        attention_config: Optional[CaptureConfig] = None,
+        residual_config: Optional[ResidualConfig] = None,
+        mlp_config: Optional[MLPConfig] = None
+    ) -> FullCapture:
+        """
+        Capture attention, residual, and MLP in a single forward pass.
+        
+        More efficient than calling capture(), capture_residual(), and
+        capture_mlp() separately since it only runs one forward pass.
+        
+        Args:
+            input_ids: [1, seq_len] token IDs
+            attention_config: Config for attention capture (None = skip)
+            residual_config: Config for residual capture (None = skip)
+            mlp_config: Config for MLP capture (None = skip)
+            
+        Returns:
+            FullCapture with all requested captures
+        """
+        from oculi._private.hooks.residual import (
+            register_residual_hooks,
+            assemble_residual_capture,
+        )
+        from oculi._private.hooks.mlp import (
+            register_mlp_hooks,
+            assemble_mlp_capture,
+        )
+        
+        if input_ids.ndim != 2 or input_ids.shape[0] != 1:
+            raise ValueError(
+                f"input_ids must be shape [1, seq_len], got {input_ids.shape}"
+            )
+        
+        n_tokens = input_ids.shape[1]
+        hidden_dim = self._model.config.hidden_size
+        intermediate_dim = self._model.config.intermediate_size
+        
+        all_handles = []
+        
+        # Attention storage and hooks
+        captured_q = {}
+        captured_k = {}
+        captured_v = {}
+        attn_layers = []
+        
+        if attention_config is not None:
+            attention_config.validate(self._n_layers)
+            attn_layers = attention_config.get_layers(self._n_layers)
+            
+            for layer_idx in attn_layers:
+                if attention_config.capture_queries:
+                    from oculi.models.llama.attention import create_capture_hook
+                    hook = create_capture_hook(
+                        captured_q, layer_idx, 'q', self._n_heads, self._head_dim
+                    )
+                    h = get_q_proj(self._model, layer_idx).register_forward_hook(hook)
+                    all_handles.append(h)
+                
+                if attention_config.capture_keys:
+                    from oculi.models.llama.attention import create_capture_hook
+                    hook = create_capture_hook(
+                        captured_k, layer_idx, 'k', self._n_kv_heads, self._head_dim
+                    )
+                    h = get_k_proj(self._model, layer_idx).register_forward_hook(hook)
+                    all_handles.append(h)
+                
+                if attention_config.capture_values:
+                    from oculi.models.llama.attention import create_capture_hook
+                    hook = create_capture_hook(
+                        captured_v, layer_idx, 'v', self._n_kv_heads, self._head_dim
+                    )
+                    h = get_v_proj(self._model, layer_idx).register_forward_hook(hook)
+                    all_handles.append(h)
+        
+        # Residual storage and hooks
+        residual_storage = {
+            'pre_attn': {},
+            'post_attn': {},
+            'pre_mlp': {},
+            'post_mlp': {},
+        }
+        residual_layers = []
+        
+        if residual_config is not None:
+            residual_config.validate(self._n_layers)
+            residual_layers = residual_config.get_layers(self._n_layers)
+            
+            handles = register_residual_hooks(
+                self._model,
+                residual_layers,
+                residual_storage,
+                capture_pre_attn=residual_config.capture_pre_attn,
+                capture_post_attn=residual_config.capture_post_attn,
+                capture_pre_mlp=residual_config.capture_pre_mlp,
+                capture_post_mlp=residual_config.capture_post_mlp,
+                dtype=residual_config.storage_dtype,
+            )
+            all_handles.extend(handles)
+        
+        # MLP storage and hooks
+        mlp_storage = {
+            'pre_activation': {},
+            'post_activation': {},
+            'gate': {},
+            'output': {},
+        }
+        mlp_layers = []
+        
+        if mlp_config is not None:
+            mlp_config.validate(self._n_layers)
+            mlp_layers = mlp_config.get_layers(self._n_layers)
+            
+            handles = register_mlp_hooks(
+                self._model,
+                mlp_layers,
+                mlp_storage,
+                capture_pre_activation=mlp_config.capture_pre_activation,
+                capture_post_activation=mlp_config.capture_post_activation,
+                capture_gate=mlp_config.capture_gate,
+                capture_output=mlp_config.capture_output,
+                dtype=mlp_config.storage_dtype,
+            )
+            all_handles.extend(handles)
+        
+        # Run forward pass
+        try:
+            input_ids = input_ids.to(self._device)
+            with torch.no_grad():
+                outputs = self._model(
+                    input_ids,
+                    output_attentions=attention_config.capture_patterns if attention_config else False,
+                    return_dict=True
+                )
+            
+            # Handle attention patterns
+            captured_patterns = {}
+            if attention_config and attention_config.capture_patterns:
+                if outputs.attentions is not None:
+                    for layer_idx in attn_layers:
+                        captured_patterns[layer_idx] = outputs.attentions[layer_idx].cpu()
+                else:
+                    captured_patterns = self._compute_attention_patterns(
+                        captured_q, captured_k, attn_layers, n_tokens
+                    )
+        finally:
+            for h in all_handles:
+                h.remove()
+        
+        # Assemble captures
+        attention_capture = None
+        if attention_config is not None:
+            queries = self._assemble_tensor(
+                captured_q, attn_layers, self._n_heads, n_tokens
+            ) if attention_config.capture_queries else None
+            
+            keys = self._assemble_tensor(
+                captured_k, attn_layers, self._n_kv_heads, n_tokens
+            ) if attention_config.capture_keys else None
+            
+            values = self._assemble_tensor(
+                captured_v, attn_layers, self._n_kv_heads, n_tokens
+            ) if attention_config.capture_values else None
+            
+            patterns = self._assemble_patterns(
+                captured_patterns, attn_layers
+            ) if attention_config.capture_patterns else None
+            
+            attention_capture = AttentionCapture(
+                queries=queries,
+                keys=keys,
+                values=values,
+                patterns=patterns,
+                n_layers=len(attn_layers),
+                n_heads=self._n_heads,
+                n_kv_heads=self._n_kv_heads,
+                n_tokens=n_tokens,
+                head_dim=self._head_dim,
+                model_name=self._model_name,
+                qk_stage=attention_config.qk_stage,
+                captured_layers=tuple(attn_layers),
+            )
+        
+        residual_capture = None
+        if residual_config is not None:
+            residual_capture = assemble_residual_capture(
+                residual_storage,
+                residual_layers,
+                n_tokens,
+                hidden_dim,
+                self._model_name,
+            )
+        
+        mlp_capture = None
+        if mlp_config is not None:
+            mlp_capture = assemble_mlp_capture(
+                mlp_storage,
+                mlp_layers,
+                n_tokens,
+                hidden_dim,
+                intermediate_dim,
+                self._model_name,
+            )
+        
+        return FullCapture(
+            attention=attention_capture,
+            residual=residual_capture,
+            mlp=mlp_capture,
+        )
     
     # =========================================================================
     # GENERATION API
