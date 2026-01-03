@@ -231,6 +231,115 @@ lens_analysis = LogitLensAnalysis(tokenizer).layer_predictions(full.logits, -1)
 
 ---
 
+## 🆕 Phase 2 Features (v0.5.0-dev)
+
+### Attribution Methods
+
+Understand **how information flows** through the transformer and **which components contribute** to outputs:
+
+```python
+from oculi.analysis import AttributionMethods, AttributionResult
+
+# Capture everything needed for attribution
+full = adapter.capture_full(input_ids)
+
+# 1. Attention Flow - Track information flow through layers
+flow = AttributionMethods.attention_flow(full.attention)
+print(f"Attention flow: {flow.values.shape}")  # [L, H, T, T]
+# flow.values[l, h, i, j] = cumulative attention from position j to i at layer l
+
+# 2. Value-Weighted Attention - Account for value magnitudes
+weighted_attn = AttributionMethods.value_weighted_attention(full.attention)
+print(f"Value-weighted patterns: {weighted_attn.values.shape}")  # [L, H, T, T]
+
+# 3. Direct Logit Attribution - Which layers contribute to predictions?
+target_token_id = tokenizer.encode("dog")[0]
+unembed = model.lm_head.weight
+
+dla = AttributionMethods.direct_logit_attribution(
+    full.residual, unembed, target_token_id, position=-1
+)
+print(f"Layer contributions: {dla.values.shape}")  # [L]
+print(f"Most important layer: {dla.values.argmax().item()}")
+
+# 4. Component Attribution - Decompose into attention vs MLP
+component_attr = AttributionMethods.component_attribution(
+    full.residual, full.mlp, unembed, target_token_id
+)
+print(f"Component attribution: {component_attr.values.shape}")  # [L, 2]
+print(f"Attention contributions: {component_attr.values[:, 0]}")
+print(f"MLP contributions: {component_attr.values[:, 1]}")
+
+# 5. Head Attribution - Per-head contributions to predictions
+head_attr = AttributionMethods.head_attribution(
+    full.attention,
+    output_weights=model.model.layers[0].self_attn.o_proj.weight,
+    unembed_matrix=unembed,
+    target_token_id=target_token_id
+)
+print(f"Head attribution: {head_attr.values.shape}")  # [L, H]
+
+# Get top contributing heads
+top_heads = AttributionMethods.top_attributions(head_attr, k=10)
+for (layer, head), score in top_heads:
+    print(f"Layer {layer}, Head {head}: {score:.4f}")
+```
+
+### Head Composition Analysis
+
+Understand **how attention heads interact** and **compose** across layers:
+
+```python
+from oculi.analysis import CompositionAnalysis, CompositionResult
+
+capture = full.attention
+
+# 1. QK Composition - How one head affects another's attention pattern
+qk_comp = CompositionAnalysis.qk_composition(
+    capture,
+    source=(10, 5),  # Layer 10, Head 5
+    target=(20, 3)   # Layer 20, Head 3
+)
+print(f"QK composition score: {qk_comp.values.mean():.4f}")
+
+# 2. OV Composition - Value flow between heads
+ov_comp = CompositionAnalysis.ov_composition(
+    capture,
+    source=(10, 5),
+    target=(20, 3)
+)
+print(f"OV composition: {ov_comp.values.shape}")  # [T]
+
+# 3. Virtual Attention - Effective attention through multi-head paths
+path = [(5, 2), (10, 7), (15, 3)]  # Path through layers
+virtual_attn = CompositionAnalysis.virtual_attention(capture, path)
+print(f"Virtual attention: {virtual_attn.values.shape}")  # [T, T]
+print(f"Path: {virtual_attn.metadata['path_str']}")
+
+# 4. Path Patching Score - Estimate importance of head paths
+path_score = CompositionAnalysis.path_patching_score(
+    capture, full.residual, path=[(10, 5), (15, 3), (20, 1)]
+)
+print(f"Path importance: {path_score.values.item():.4f}")
+
+# 5. Composition Matrix - Full head-to-head interactions
+comp_matrix = CompositionAnalysis.composition_matrix(capture, method="qk")
+print(f"Composition matrix: {comp_matrix.values.shape}")  # [L*H, L*H]
+
+# 6. Induction Circuit Detection - Find prev-token + induction head pairs
+circuits = CompositionAnalysis.detect_induction_circuit(capture, threshold=0.3)
+print(f"Found {len(circuits.metadata['circuits'])} induction circuits")
+
+for circuit in circuits.metadata['circuits'][:5]:  # Top 5
+    prev_head = circuit['previous_token_head']
+    ind_head = circuit['induction_head']
+    score = circuit['composition_score']
+    print(f"Circuit: L{prev_head[0]}H{prev_head[1]} → L{ind_head[0]}H{ind_head[1]} "
+          f"(score: {score:.3f})")
+```
+
+---
+
 ## Analysis Examples
 
 ### Entropy Analysis
@@ -415,8 +524,10 @@ oculi/
 ├── analysis/        # Pure analysis functions
 │   ├── entropy.py       # Entropy metrics
 │   ├── norms.py         # Vector norms
-│   ├── circuits.py      # Circuit detection ✨ NEW
-│   ├── logit_lens.py    # Logit lens analysis ✨ NEW
+│   ├── circuits.py      # Circuit detection
+│   ├── logit_lens.py    # Logit lens analysis
+│   ├── attribution.py   # Attribution methods ✨ PHASE 2
+│   ├── composition.py   # Head composition ✨ PHASE 2
 │   ├── correlation.py   # Statistical analysis
 │   └── stratified.py    # Slicing helpers
 │
@@ -476,10 +587,11 @@ circuits = CircuitDetection.detect_induction_heads(capture)
 - ✅ Unified full capture
 
 ### 🔄 Phase 2 (v0.5.0 - v0.6.0) - In Progress
-- [ ] Attribution methods (attention flow, direct logit attribution)
-- [ ] Head composition analysis (OV/QK circuits)
+- ✅ **Attribution methods** (v0.5.0) - attention flow, value-weighted attention, direct logit attribution, component attribution, head attribution
+- ✅ **Head composition analysis** (v0.5.0) - QK/OV composition, virtual attention, path patching, composition matrices, induction circuit detection
 - [ ] Activation patching (causal interventions)
-- [ ] Steering vectors
+- [ ] SAE integration
+- [ ] Probing & steering vectors
 
 ### ⏳ Phase 3 (v0.7.0 - v0.8.0) - Planned
 - [ ] Caching system

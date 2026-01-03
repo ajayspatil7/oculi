@@ -1,0 +1,158 @@
+/* Custom styles for Oculi documentation */
+
+/* Code blocks with syntax highlighting */
+.highlight {
+    border-radius: 4px;
+}
+
+/* Improve readability of inline code */
+code {
+    padding: 2px 6px;
+    border-radius: 3px;
+    background-color: rgba(0, 0, 0, 0.04);
+}
+
+/* Dark mode inline code */
+[data-md-color-scheme="slate"] code {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* Admonition customization */
+.admonition {
+    border-left: 4px solid;
+    border-radius: 4px;
+}
+
+/* Grid cards for homepage */
+.grid.cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1rem;
+    margin: 1rem 0;
+}
+
+.grid.cards > * {
+    border: 1px solid var(--md-default-fg-color--lightest);
+    border-radius: 0.2rem;
+    padding: 1rem;
+    transition: box-shadow 0.2s;
+}
+
+.grid.cards > *:hover {
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Table improvements */
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1em 0;
+}
+
+table th {
+    background-color: var(--md-default-fg-color--lightest);
+    font-weight: 600;
+}
+
+/* Version badge */
+.md-version {
+    font-size: 0.9em;
+}
+
+/* Code annotation improvements */
+.md-annotation__index {
+    background-color: var(--md-accent-fg-color);
+}
+
+/* Improve navigation typography */
+.md-nav__title {
+    font-weight: 600;
+}
+
+/* Better spacing for lists in documentation */
+.md-typeset ol,
+.md-typeset ul {
+    margin-left: 0;
+    padding-left: 1.5em;
+}
+
+/* Highlight important sections */
+.md-typeset .admonition.tip,
+.md-typeset .admonition.important {
+    border-left-width: 6px;
+}
+
+/* Footer customization */
+.md-footer-meta {
+    background-color: var(--md-footer-bg-color);
+}
+
+/* Responsive images */
+.md-typeset img {
+    max-width: 100%;
+    height: auto;
+}
+
+/* Code block copy button */
+.md-clipboard {
+    color: var(--md-default-fg-color--light);
+}
+
+/* Search result highlighting */
+.md-search-result__meta {
+    color: var(--md-default-fg-color--light);
+}
+
+/* Improve readability of footnotes */
+.md-typeset .footnote {
+    font-size: 0.85em;
+}
+
+/* Better mobile navigation */
+@media screen and (max-width: 76.1875em) {
+    .md-nav--primary .md-nav__title {
+        background-color: var(--md-primary-fg-color);
+    }
+}
+
+/* Custom badge styling */
+.badge {
+    display: inline-block;
+    padding: 0.25em 0.6em;
+    font-size: 0.75em;
+    font-weight: 600;
+    line-height: 1;
+    text-align: center;
+    white-space: nowrap;
+    vertical-align: baseline;
+    border-radius: 0.25rem;
+}
+
+.badge-success {
+    background-color: #28a745;
+    color: white;
+}
+
+.badge-info {
+    background-color: #17a2b8;
+    color: white;
+}
+
+.badge-warning {
+    background-color: #ffc107;
+    color: black;
+}
+
+/* Improved heading anchors */
+.md-typeset h1 .headerlink,
+.md-typeset h2 .headerlink,
+.md-typeset h3 .headerlink {
+    opacity: 0;
+    margin-left: 0.5rem;
+}
+
+.md-typeset h1:hover .headerlink,
+.md-typeset h2:hover .headerlink,
+.md-typeset h3:hover .headerlink {
+    opacity: 1;
+}

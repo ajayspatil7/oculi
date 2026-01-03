@@ -1,0 +1,136 @@
+site_name: Oculi Documentation
+site_description: Comprehensive mechanistic interpretability toolkit for transformer LLMs
+site_author: Ajay S Patil
+site_url: https://github.com/ajayspatil7/oculi
+
+repo_name: ajayspatil7/oculi
+repo_url: https://github.com/ajayspatil7/oculi
+edit_uri: edit/main/docs/
+
+copyright: Copyright &copy; 2024 - 2025 Ajay S Patil
+
+theme:
+  name: material
+  palette:
+    # Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: deep purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: deep purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
+  icon:
+    repo: fontawesome/brands/github
+  font:
+    text: Roboto
+    code: Roboto Mono
+
+plugins:
+  - search:
+      lang: en
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+            heading_level: 2
+            members_order: source
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+  - admonition
+  - tables
+  - attr_list
+  - md_in_html
+  - def_list
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - toc:
+      permalink: true
+      toc_depth: 3
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quick-start.md
+    - Core Concepts: getting-started/core-concepts.md
+  - User Guide:
+    - Attention Capture: guides/attention-capture.md
+    - Residual Stream: guides/residual-stream.md
+    - MLP Analysis: guides/mlp-analysis.md
+    - Logit Lens: guides/logit-lens.md
+    - Circuit Detection: guides/circuit-detection.md
+    - Attribution Methods: guides/attribution-methods.md
+    - Head Composition: guides/composition-analysis.md
+    - Interventions: guides/interventions.md
+  - Tutorials:
+    - Basic Attention Capture: tutorials/01-basic-attention.md
+    - Circuit Detection: tutorials/02-circuit-detection.md
+    - Logit Lens Analysis: tutorials/03-logit-lens.md
+    - Attribution Analysis: tutorials/04-attribution.md
+    - Composition Analysis: tutorials/05-composition.md
+  - API Reference:
+    - Capture: api-reference/capture.md
+    - Analysis: api-reference/analysis.md
+    - Intervention: api-reference/intervention.md
+    - Visualization: api-reference/visualization.md
+  - Architecture:
+    - Design Philosophy: architecture/design-philosophy.md
+    - Data Structures: architecture/data-structures.md
+    - Extending Oculi: architecture/extending-oculi.md
+    - API Contract: API_CONTRACT.md
+  - Development:
+    - Contributing: CONTRIBUTING.md
+    - Changelog: CHANGELOG.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/ajayspatil7/oculi
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/oculi/
+  version:
+    provider: mike
+
+extra_css:
+  - stylesheets/extra.css

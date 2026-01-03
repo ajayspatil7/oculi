@@ -49,8 +49,14 @@ viz = [
     "matplotlib>=3.7.0",
     "seaborn>=0.12.0",
 ]
+docs = [
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.0.0",
+    "mkdocstrings[python]>=0.24.0",
+    "pymdown-extensions>=10.0",
+]
 all = [
-    "oculi[dev,viz]",
+    "oculi[dev,viz,docs]",
 ]
 
 [project.urls]

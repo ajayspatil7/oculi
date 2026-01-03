@@ -344,13 +344,14 @@ class LlamaAttentionAdapter(AttentionAdapter):
             q = captured_q[layer_idx].float()  # [1, T, H_q, D]
             k = captured_k[layer_idx].float()  # [1, T, H_kv, D]
             
-            # Expand K for GQA: [1, T, H_kv, D] -> [1, T, H_q, D]
+            # Transpose to [1, H, T, D] FIRST
+            q = q.permute(0, 2, 1, 3)  # [1, H_q, T, D]
+            k = k.permute(0, 2, 1, 3)  # [1, H_kv, T, D]
+            
+            # THEN expand K for GQA: [1, H_kv, T, D] -> [1, H_q, T, D]
+            # expand_kv_for_gqa expects [batch, heads, seq, dim] format
             if self._n_kv_heads != self._n_heads:
                 k = expand_kv_for_gqa(k, self._n_heads, self._n_kv_heads)
-            
-            # Transpose to [1, H, T, D]
-            q = q.permute(0, 2, 1, 3)  # [1, H, T, D]
-            k = k.permute(0, 2, 1, 3)  # [1, H, T, D]
             
             # Compute attention scores: [1, H, T, T]
             scores = torch.matmul(q, k.transpose(-2, -1)) * scale
