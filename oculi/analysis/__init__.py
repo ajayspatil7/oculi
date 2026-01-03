@@ -22,6 +22,8 @@ Classes
 - StratifiedView: Layer/head/token slicing helpers
 - LogitLensAnalysis: Layer-by-layer prediction analysis
 - CircuitDetection: Canonical circuit pattern detection
+- AttributionMethods: Causal attribution for information flow
+- CompositionAnalysis: Head composition and interaction analysis
 """
 
 from oculi.analysis.norms import NormAnalysis
@@ -35,6 +37,8 @@ from oculi.analysis.stratified import (
 )
 from oculi.analysis.logit_lens import LogitLensAnalysis
 from oculi.analysis.circuits import CircuitDetection
+from oculi.analysis.attribution import AttributionMethods, AttributionResult
+from oculi.analysis.composition import CompositionAnalysis, CompositionResult
 
 __all__ = [
     "NormAnalysis",
@@ -46,5 +50,11 @@ __all__ = [
     "find_extreme_heads",
     "LogitLensAnalysis",
     "CircuitDetection",
+    "AttributionMethods",
+    "AttributionResult",
+    "CompositionAnalysis",
+    "CompositionResult",
 ]
+
+
 
