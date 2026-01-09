@@ -15,23 +15,27 @@ Oculi is a **research-first** mechanistic interpretability toolkit for transform
 ### Core Capabilities
 
 **Comprehensive Capture System:**
+
 - ✅ **Attention Internals** — Q/K/V vectors, attention patterns with pre/post-RoPE options
 - ✅ **Residual Stream** — Activations at all intervention points (pre/post attention, pre/post MLP)
 - ✅ **MLP Internals** — Gate, up projections, activations, and outputs
 - ✅ **Layer-wise Logits** — Logit lens analysis with memory-efficient top-k
 
 **Analysis Tools:**
+
 - 🔍 **Circuit Detection** — Automatic detection of induction heads, previous token heads, positional patterns
 - 📊 **Logit Lens** — Track prediction formation across layers
 - 📈 **Entropy & Norms** — Attention focus metrics, vector magnitudes
 - 🔗 **Correlation Analysis** — Statistical relationships with p-values
 
 **Surgical Interventions:**
+
 - 🎯 **Q/K Scaling** — The Spectra method for attention sharpening/flattening
 - ❌ **Head Ablation** — Zero out specific attention heads
 - 🔄 **Activation Patching** — (Coming in v0.6.0)
 
 **Design Philosophy:**
+
 - **Learning-First** — Adapters are _executable documentation_ of model internals
 - **Pure Functional** — Stateless, deterministic analysis functions
 - **Explicit Control** — No magic, you choose what to capture
@@ -55,6 +59,7 @@ pip install -e ".[all]"
 ```
 
 **Requirements:**
+
 - Python 3.10+
 - PyTorch 2.0.0+
 - Transformers 4.30.0+
@@ -69,8 +74,13 @@ pip install -e ".[all]"
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from oculi.models.llama import LlamaAttentionAdapter
 
-# Load model explicitly (no magic auto-detection)
-model = AutoModelForCausalLM.from_pretrained("meta-llama/Meta-Llama-3-8B")
+# Load model explicitly (no magic)
+model = AutoModelForCausalLM.from_pretrained(
+    "meta-llama/Meta-Llama-3-8B",
+    low_cpu_mem_usage=True,
+    device_map="auto",
+    torch_dtype="auto",
+)
 tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B")
 
 # Create adapter
@@ -580,6 +590,7 @@ circuits = CircuitDetection.detect_induction_heads(capture)
 ## Roadmap
 
 ### ✅ Phase 1 (v0.3.0 - v0.4.0) - Complete
+
 - ✅ Residual stream capture
 - ✅ MLP internals capture
 - ✅ Logit lens analysis
@@ -587,6 +598,7 @@ circuits = CircuitDetection.detect_induction_heads(capture)
 - ✅ Unified full capture
 
 ### 🔄 Phase 2 (v0.5.0 - v0.6.0) - In Progress
+
 - ✅ **Attribution methods** (v0.5.0) - attention flow, value-weighted attention, direct logit attribution, component attribution, head attribution
 - ✅ **Head composition analysis** (v0.5.0) - QK/OV composition, virtual attention, path patching, composition matrices, induction circuit detection
 - [ ] Activation patching (causal interventions)
@@ -594,12 +606,14 @@ circuits = CircuitDetection.detect_induction_heads(capture)
 - [ ] Probing & steering vectors
 
 ### ⏳ Phase 3 (v0.7.0 - v0.8.0) - Planned
+
 - [ ] Caching system
 - [ ] Memory optimization (FP16, lazy materialization)
 - [ ] Export formats (HDF5, JSON, NumPy)
 - [ ] TransformerLens compatibility
 
 ### 🎯 Phase 4 (v1.0.0) - Future
+
 - [ ] API freeze
 - [ ] Complete documentation
 - [ ] Benchmark suite
@@ -643,5 +657,6 @@ MIT License - see [LICENSE](LICENSE) for details
 ## Author
 
 **Ajay S Patil**
+
 - GitHub: [@ajayspatil7](https://github.com/ajayspatil7)
 - Email: ajayspatil7@gmail.com
