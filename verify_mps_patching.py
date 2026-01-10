@@ -125,7 +125,13 @@ def test_activation_patch(adapter, device):
     input_ids = adapter.tokenize(text)
 
     # Capture activations
-    capture = adapter.capture_full(input_ids)
+    from oculi import MLPConfig, ResidualConfig
+
+    capture = adapter.capture_full(
+        input_ids,
+        mlp_config=MLPConfig(capture_output=True),
+        residual_config=ResidualConfig(capture_post_mlp=True)
+    )
 
     print(f"  Captured from {capture.mlp.n_tokens} tokens")
 
@@ -180,7 +186,12 @@ def test_patching_context(adapter, model, device):
 
     # Capture clean activations
     print("  Capturing clean activations...")
-    clean_capture = adapter.capture_full(clean_ids)
+    from oculi import MLPConfig
+
+    clean_capture = adapter.capture_full(
+        clean_ids,
+        mlp_config=MLPConfig(capture_output=True)
+    )
 
     # Create patch
     patch = ActivationPatch(
