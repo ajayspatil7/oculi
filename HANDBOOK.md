@@ -691,7 +691,7 @@ clean_capture = adapter.capture_full(clean_ids)
 # Step 3: Create a patch
 patch = ActivationPatch(
     config=PatchConfig(layer=20, component='mlp_out'),
-    source_activation=clean_capture.mlp.output[20]  # From clean run
+    source_activation=clean_capture.mlp.mlp_output[20]  # From clean run
 )
 
 # Step 4: Apply patch during corrupted run
@@ -869,7 +869,7 @@ Apply multiple patches simultaneously:
 patches = [
     ActivationPatch(
         PatchConfig(layer=20, component='mlp_out'),
-        clean_capture.mlp.output[20]
+        clean_capture.mlp.mlp_output[20]
     ),
     ActivationPatch(
         PatchConfig(layer=21, component='attn_out'),
