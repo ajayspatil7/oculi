@@ -64,6 +64,12 @@ pip install -e ".[all]"
 - PyTorch 2.0.0+
 - Transformers 4.30.0+
 
+**Supported Devices:**
+
+- ✅ **CUDA** (NVIDIA GPUs)
+- ✅ **MPS** (Apple Silicon - M1/M2/M3/M4)
+- ✅ **CPU** (Fallback)
+
 ---
 
 ## Quick Start
@@ -73,17 +79,22 @@ pip install -e ".[all]"
 ```python
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from oculi.models.llama import LlamaAttentionAdapter
+from oculi.utils import get_default_device
+
+# Auto-detect best device (CUDA/MPS/CPU)
+device = get_default_device()
+print(f"Using device: {device}")
 
 # Load model explicitly (no magic)
 model = AutoModelForCausalLM.from_pretrained(
     "meta-llama/Meta-Llama-3-8B",
     low_cpu_mem_usage=True,
-    device_map="auto",
+    device_map=str(device),
     torch_dtype="auto",
 )
 tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B")
 
-# Create adapter
+# Create adapter - works on CUDA, MPS, or CPU
 adapter = LlamaAttentionAdapter(model, tokenizer)
 
 # Capture attention data

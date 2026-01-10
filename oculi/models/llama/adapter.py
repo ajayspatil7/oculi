@@ -30,8 +30,10 @@ Usage:
 
 from typing import Optional, Dict, List, Callable, Union
 import torch
+import warnings
 
 from oculi.models.base import AttentionAdapter, CaptureError
+from oculi.utils.device import auto_select_device, validate_device_compatibility
 from oculi.capture.structures import (
     AttentionCapture,
     AttentionStructure,
@@ -93,13 +95,32 @@ class LlamaAttentionAdapter(AttentionAdapter):
     ):
         self._model = model
         self._tokenizer = tokenizer
-        
+
         # Determine device from model
         if device is not None:
             self._device = torch.device(device)
         else:
             self._device = next(model.parameters()).device
-        
+
+        # Validate MPS compatibility if using MPS
+        if self._device.type == "mps":
+            torch_version = tuple(map(int, torch.__version__.split('.')[:2]))
+            if torch_version < (2, 0):
+                warnings.warn(
+                    f"MPS support requires PyTorch 2.0+. Current version: {torch.__version__}. "
+                    f"Consider upgrading or using CPU/CUDA.",
+                    UserWarning
+                )
+
+            # Inform user about MPS fallback
+            import os
+            if os.environ.get('PYTORCH_ENABLE_MPS_FALLBACK') != '1':
+                warnings.warn(
+                    "For optimal MPS experience, set PYTORCH_ENABLE_MPS_FALLBACK=1 "
+                    "to enable automatic CPU fallback for unsupported operations.",
+                    UserWarning
+                )
+
         # Cache architecture info from model config
         config = model.config
         self._model_name = getattr(config, '_name_or_path', 'llama')
@@ -107,11 +128,11 @@ class LlamaAttentionAdapter(AttentionAdapter):
         self._n_heads = config.num_attention_heads
         self._n_kv_heads = getattr(config, 'num_key_value_heads', self._n_heads)
         self._head_dim = config.hidden_size // self._n_heads
-        
+
         # Hook management
         self._hooks: Dict[str, torch.utils.hooks.RemovableHandle] = {}
         self._hook_counter = 0
-        
+
         # Ensure model is in eval mode
         self._model.eval()
     
@@ -275,7 +296,7 @@ class LlamaAttentionAdapter(AttentionAdapter):
                 if native_patterns:
                     # Model returned patterns (eager attention mode)
                     for layer_idx in layers_to_capture:
-                        captured_patterns[layer_idx] = outputs.attentions[layer_idx].cpu()
+                        captured_patterns[layer_idx] = outputs.attentions[layer_idx]  # Keep on device
                 else:
                     # SDPA/FlashAttention - compute patterns manually from Q and K
                     captured_patterns = self._compute_attention_patterns(
@@ -365,9 +386,9 @@ class LlamaAttentionAdapter(AttentionAdapter):
             
             # Softmax
             attn_probs = torch.softmax(scores, dim=-1)
-            
-            # Store [1, H, T, T]
-            patterns[layer_idx] = attn_probs.cpu()
+
+            # Store [1, H, T, T] - keep on device
+            patterns[layer_idx] = attn_probs
         
         return patterns
     
@@ -635,7 +656,7 @@ class LlamaAttentionAdapter(AttentionAdapter):
             # model would predict at that layer
             normalized = final_norm(post_mlp)  # [L, T, H]
             all_logits = normalized @ lm_head.weight.T  # [L, T, V]
-            all_logits = all_logits.to(config.storage_dtype).cpu()
+            all_logits = all_logits.to(config.storage_dtype)  # Keep on device
         
         if config.top_k is not None:
             # Only store top-k
@@ -808,7 +829,7 @@ class LlamaAttentionAdapter(AttentionAdapter):
             if attention_config and attention_config.capture_patterns:
                 if outputs.attentions is not None:
                     for layer_idx in attn_layers:
-                        captured_patterns[layer_idx] = outputs.attentions[layer_idx].cpu()
+                        captured_patterns[layer_idx] = outputs.attentions[layer_idx]  # Keep on device
                 else:
                     captured_patterns = self._compute_attention_patterns(
                         captured_q, captured_k, attn_layers, n_tokens

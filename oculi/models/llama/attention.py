@@ -365,6 +365,6 @@ def create_capture_hook(
     def hook(module, input, output):
         batch, seq, hidden = output.shape
         reshaped = output.view(batch, seq, n_heads, head_dim)
-        storage[layer_idx] = reshaped.detach().cpu()
-    
+        storage[layer_idx] = reshaped.detach()  # Keep on original device (CUDA/MPS/CPU)
+
     return hook

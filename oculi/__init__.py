@@ -58,6 +58,15 @@ from oculi.capture.structures import (
     FullCapture,
 )
 
+# Device utilities
+from oculi.utils.device import (
+    get_default_device,
+    get_device_info,
+    is_mps_available,
+    is_cuda_available,
+    auto_select_device,
+)
+
 # Base adapter contract
 from oculi.models.base import (
     AttentionAdapter,
@@ -81,12 +90,12 @@ from oculi import capture
 __all__ = [
     # Version
     "__version__",
-    
+
     # Core structures
     "AttentionCapture",
-    "AttentionStructure", 
+    "AttentionStructure",
     "CaptureConfig",
-    
+
     # Phase 1 structures
     "ResidualCapture",
     "ResidualConfig",
@@ -95,12 +104,19 @@ __all__ = [
     "LogitCapture",
     "LogitConfig",
     "FullCapture",
-    
+
     # Base adapter
     "AttentionAdapter",
     "UnsupportedModelError",
     "CaptureError",
-    
+
+    # Device utilities (MPS/CUDA/CPU support)
+    "get_default_device",
+    "get_device_info",
+    "is_mps_available",
+    "is_cuda_available",
+    "auto_select_device",
+
     # Modules
     "models",
     "analysis",

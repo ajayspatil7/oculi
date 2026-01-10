@@ -62,16 +62,63 @@ print("✓ All imports successful!")
 
 ## Platform-Specific Notes
 
-### macOS (Apple Silicon)
+### macOS (Apple Silicon) - MPS Support ✨
 
-For Apple Silicon Macs (M1/M2/M3/M4):
+Oculi **fully supports** Apple Silicon (M1/M2/M3/M4) with MPS (Metal Performance Shaders) acceleration!
+
+**Requirements:**
+- PyTorch 2.0.0+ (for optimal MPS support)
+- macOS 12.3+
+
+**Setup:**
 
 ```bash
-# Use MPS backend for acceleration
+# Enable MPS fallback for unsupported operations
 export PYTORCH_ENABLE_MPS_FALLBACK=1
+
+# Verify MPS is available
+python -c "import torch; print(f'MPS available: {torch.backends.mps.is_available()}')"
 ```
 
-Oculi works on CPU, but some operations may be slower. For best performance, use CUDA-enabled systems for large models.
+**Usage:**
+
+```python
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from oculi.models.llama import LlamaAttentionAdapter
+from oculi.utils import get_default_device
+
+# Auto-detect best device (MPS on Apple Silicon)
+device = get_default_device()
+print(f"Using device: {device}")  # mps
+
+# Load model on MPS
+model = AutoModelForCausalLM.from_pretrained(
+    "meta-llama/Llama-3.2-3B-Instruct",
+    torch_dtype=torch.float16,  # Recommended for MPS
+    device_map="mps"
+)
+tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-3B-Instruct")
+
+# Create adapter - works seamlessly on MPS
+adapter = LlamaAttentionAdapter(model, tokenizer)
+```
+
+**Performance Tips:**
+- Use `torch.float16` for better memory efficiency on MPS
+- Smaller models (1B-8B) work well on Apple Silicon
+- For models >8B, monitor system memory usage
+
+**Device Detection:**
+
+Oculi automatically detects and uses the best available device:
+
+```python
+from oculi.utils import get_device_info
+
+info = get_device_info()
+print(info)
+# DeviceInfo(device_type='mps', device=device(type='mps'), device_name='Apple Silicon (MPS)')
+```
 
 ### Linux (CUDA)
 
@@ -80,11 +127,27 @@ Ensure you have CUDA-compatible PyTorch:
 ```bash
 # Check PyTorch CUDA availability
 python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
+
+# Verify CUDA device
+python -c "import torch; print(torch.cuda.get_device_name(0))"
+```
+
+**Usage:**
+
+```python
+from oculi.utils import get_default_device
+
+device = get_default_device()  # Automatically selects CUDA if available
+print(f"Using: {device}")  # cuda:0
 ```
 
 ### Windows
 
-Oculi supports Windows with standard Python installation. Use WSL2 for best compatibility with CUDA.
+Oculi supports Windows with standard Python installation:
+
+- **With NVIDIA GPU:** Use CUDA (see Linux section)
+- **Without GPU:** CPU mode works perfectly
+- **WSL2:** Recommended for best CUDA compatibility
 
 ## Testing Without GPU
 
