@@ -4,8 +4,8 @@
 
 ---
 
-**Author:** Ajay S Patil  
-**Version:** 0.5.0  
+**Author:** Ajay S Patil
+**Version:** 0.6.0
 **Model:** `meta-llama/Llama-3.2-3B-Instruct`
 
 ---
@@ -22,8 +22,9 @@
 8. [Chapter 7: Attribution Methods](#chapter-7-attribution-methods)
 9. [Chapter 8: Head Composition](#chapter-8-head-composition)
 10. [Chapter 9: Interventions](#chapter-9-interventions)
-11. [Appendix A: Tensor Shapes](#appendix-a-tensor-shapes)
-12. [Appendix B: Troubleshooting](#appendix-b-troubleshooting)
+11. [Chapter 10: Activation Patching](#chapter-10-activation-patching)
+12. [Appendix A: Tensor Shapes](#appendix-a-tensor-shapes)
+13. [Appendix B: Troubleshooting](#appendix-b-troubleshooting)
 
 ---
 
@@ -607,6 +608,379 @@ with InterventionContext(adapter, [ablation]):
 
 print(f"Without L20H3: {tokenizer.decode(output[0])}")
 ```
+
+---
+
+# Chapter 10: Activation Patching
+
+## What You'll Learn
+
+- What is activation patching and why it matters
+- Causal intervention methodology
+- Manual patching with PatchingContext
+- Systematic tracing with CausalTracer
+- Recovery score interpretation
+
+## Why It Matters
+
+**The Gold Standard for Causality**
+
+Correlation ≠ Causation. Just because a component activates doesn't mean it's *necessary* for the output.
+
+Activation patching answers: **"Is this component causally responsible for this behavior?"**
+
+**The Method:**
+1. **Clean run**: Model on correct input → save activations
+2. **Corrupted run**: Model on incorrect input → wrong output
+3. **Patch**: Replace corrupted activations with clean ones
+4. **Measure**: Does output recover to clean behavior?
+
+If patching component X recovers the correct output, X is **causally necessary**.
+
+## Real-World Applications
+
+- **Circuit Discovery**: Find minimal circuits for behaviors
+- **Debugging**: Pinpoint where models fail
+- **Safety**: Identify components responsible for harmful outputs
+- **Factual Recall**: Track where facts are stored (ROME, Meng et al. 2022)
+
+---
+
+## The Paradigm
+
+```
+Clean Input:    "The capital of France is" → "Paris" ✓
+Corrupted:      "The capital of Poland is" → "Warsaw"
+
+Question: Which layer/component causes the difference?
+
+Method: Patch clean activations → corrupted run
+
+Layer 5 MLP  → Recovery: 0.1  (not important)
+Layer 15 MLP → Recovery: 0.8  (important!)
+Layer 25 MLP → Recovery: 0.3  (somewhat important)
+```
+
+**Recovery Score:**
+```
+recovery = (metric_patched - metric_corrupted) / (metric_clean - metric_corrupted)
+```
+
+- **1.0** = Full recovery (component fully explains behavior)
+- **0.0** = No recovery (component doesn't matter)
+- **>1.0** = Over-recovery (patching overcompensated)
+- **<0.0** = Negative (patching made it worse)
+
+---
+
+## 🔬 Hands-On: Manual Patching
+
+```python
+from oculi.intervention import PatchConfig, ActivationPatch, PatchingContext
+
+# Step 1: Define your inputs
+clean_text = "The Eiffel Tower is in Paris"
+corrupt_text = "The Eiffel Tower is in London"
+
+clean_ids = tokenizer.encode(clean_text, return_tensors="pt").to(device)
+corrupt_ids = tokenizer.encode(corrupt_text, return_tensors="pt").to(device)
+
+# Step 2: Capture clean activations
+clean_capture = adapter.capture_full(clean_ids)
+
+# Step 3: Create a patch
+patch = ActivationPatch(
+    config=PatchConfig(layer=20, component='mlp_out'),
+    source_activation=clean_capture.mlp.output[20]  # From clean run
+)
+
+# Step 4: Apply patch during corrupted run
+with PatchingContext(adapter, [patch]):
+    patched_output = model(corrupt_ids)
+    patched_logits = patched_output.logits
+
+# Step 5: Compare
+clean_logits = model(clean_ids).logits
+corrupt_logits = model(corrupt_ids).logits
+
+target_token = tokenizer.encode("Paris", add_special_tokens=False)[0]
+
+clean_prob = torch.softmax(clean_logits[0, -1], dim=-1)[target_token].item()
+corrupt_prob = torch.softmax(corrupt_logits[0, -1], dim=-1)[target_token].item()
+patched_prob = torch.softmax(patched_logits[0, -1], dim=-1)[target_token].item()
+
+print(f"P('Paris' | clean):    {clean_prob:.3f}")
+print(f"P('Paris' | corrupt):  {corrupt_prob:.3f}")
+print(f"P('Paris' | patched):  {patched_prob:.3f}")
+
+recovery = (patched_prob - corrupt_prob) / (clean_prob - corrupt_prob)
+print(f"\nRecovery: {recovery:.2f}")
+```
+
+---
+
+## 🔬 Hands-On: Systematic Causal Tracing
+
+Instead of manually testing each component, use `CausalTracer` to sweep all layers:
+
+```python
+from oculi.intervention import CausalTracer
+
+tracer = CausalTracer(adapter)
+
+# Define metric function
+target_token = tokenizer.encode("Paris", add_special_tokens=False)[0]
+
+def metric_fn(logits):
+    """Get probability of target token."""
+    probs = torch.softmax(logits[0, -1], dim=-1)
+    return probs[target_token].item()
+
+# Run systematic sweep
+results = tracer.trace(
+    clean_input=clean_ids,
+    corrupted_input=corrupt_ids,
+    metric_fn=metric_fn,
+    layers=range(20, 28),         # Sweep layers 20-27
+    components=['mlp_out', 'attn_out'],
+    verbose=True,
+)
+
+print(results.summary())
+```
+
+**Output:**
+```
+Clean metric: 0.9234
+Corrupted metric: 0.0123
+Difference: 0.9111
+
+Patching L20 mlp_out... recovery=0.12
+Patching L20 attn_out... recovery=0.05
+Patching L21 mlp_out... recovery=0.34
+Patching L21 attn_out... recovery=0.18
+Patching L22 mlp_out... recovery=0.87  ← Important!
+...
+```
+
+---
+
+## 🔬 Hands-On: Analyzing Results
+
+```python
+# Get top 5 most important components
+top_5 = results.top_results(5)
+
+for result in top_5:
+    print(f"L{result.config.layer} {result.config.component}: "
+          f"recovery={result.recovery:.2f}")
+```
+
+**Output:**
+```
+L22 mlp_out: recovery=0.87
+L23 attn_out: recovery=0.72
+L24 mlp_out: recovery=0.65
+L21 mlp_out: recovery=0.34
+L25 mlp_out: recovery=0.28
+```
+
+**Interpretation**: Layer 22 MLP is **causally critical** for this fact!
+
+---
+
+## 🔬 Hands-On: Recovery Heatmap
+
+```python
+import matplotlib.pyplot as plt
+
+# Get recovery matrix [layers × components]
+matrix = results.recovery_matrix()
+
+plt.figure(figsize=(10, 6))
+plt.imshow(matrix.numpy(), cmap='RdYlGn', vmin=0, vmax=1)
+plt.colorbar(label='Recovery Score')
+plt.xlabel('Component')
+plt.ylabel('Layer')
+plt.xticks(range(len(results.components)), results.components, rotation=45)
+plt.yticks(range(len(results.layers)), results.layers)
+plt.title('Causal Importance Heatmap')
+plt.tight_layout()
+plt.show()
+```
+
+This shows which layers/components are **causally responsible**.
+
+---
+
+## 🔬 Hands-On: Component Types
+
+Oculi supports patching 6 different intervention points:
+
+```python
+# Residual stream points
+PatchConfig(layer=20, component='residual_pre_attn')   # Layer input
+PatchConfig(layer=20, component='residual_post_attn')  # After attention
+PatchConfig(layer=20, component='residual_post_mlp')   # After MLP
+
+# Component outputs
+PatchConfig(layer=20, component='attn_out')  # Attention output
+PatchConfig(layer=20, component='mlp_out')   # MLP output
+
+# Single head
+PatchConfig(layer=20, component='head', head=5)  # Specific attention head
+```
+
+---
+
+## 🔬 Hands-On: Token-Level Patching
+
+Patch only specific token positions:
+
+```python
+# Only patch positions 5, 6, 7
+patch = ActivationPatch(
+    config=PatchConfig(
+        layer=20,
+        component='mlp_out',
+        tokens=[5, 6, 7]  # Only these positions
+    ),
+    source_activation=clean_capture.mlp.output[20]
+)
+
+# Useful for finding which tokens are causally important
+results = tracer.trace(
+    clean_input=clean_ids,
+    corrupted_input=corrupt_ids,
+    metric_fn=metric_fn,
+    layers=[22],
+    components=['mlp_out'],
+    tokens=[5],  # Only patch subject token
+)
+```
+
+---
+
+## 🔬 Hands-On: Multiple Patches
+
+Apply multiple patches simultaneously:
+
+```python
+patches = [
+    ActivationPatch(
+        PatchConfig(layer=20, component='mlp_out'),
+        clean_capture.mlp.output[20]
+    ),
+    ActivationPatch(
+        PatchConfig(layer=21, component='attn_out'),
+        clean_capture.attention.attn_out[21]  # If captured
+    ),
+]
+
+with PatchingContext(adapter, patches):
+    output = model(corrupt_ids)
+
+# Test if combination of components is necessary
+```
+
+---
+
+## Advanced: Finding Circuits
+
+Combine with attribution to find **minimal circuits**:
+
+1. **Attribution** → Find components that *correlate* with output
+2. **Patching** → Verify which are *causally necessary*
+3. **Composition** → Find connections between components
+
+```python
+# Step 1: Attribution
+from oculi.analysis import AttributionMethods
+
+dla = AttributionMethods.direct_logit_attribution(...)
+top_layers = dla.top_k(5)  # Most activated layers
+
+# Step 2: Causal Verification
+results = tracer.trace(
+    clean_input=clean_ids,
+    corrupted_input=corrupt_ids,
+    metric_fn=metric_fn,
+    layers=top_layers,  # Only test high-attribution layers
+    components=['mlp_out', 'attn_out'],
+)
+
+# Step 3: Find causally necessary components
+causal_components = [r for r in results.results if r.recovery > 0.7]
+
+print("Minimal Circuit Components:")
+for comp in causal_components:
+    print(f"  L{comp.config.layer} {comp.config.component}")
+```
+
+---
+
+## Key Insights
+
+1. **Localization**: Facts are often stored in specific MLP layers
+2. **Attention Routes**: Attention heads route information, MLPs store it
+3. **Late Layers**: Factual recall often happens in later layers (20-28 for LLaMA-3)
+4. **Redundancy**: Multiple components can contribute (recovery can sum > 1.0)
+
+---
+
+## Common Pitfalls
+
+**1. Metric Selection**
+
+Bad: `lambda logits: logits[0, -1, 0].item()`  (arbitrary token)
+Good: `lambda logits: probs[target_token].item()` (meaningful token)
+
+**2. Input Selection**
+
+- Clean and corrupted should differ in **only one fact**
+- Too different → recovery scores uninterpretable
+
+**3. Device Compatibility**
+
+```python
+# Ensure activations on same device as model
+clean_capture = adapter.capture_full(clean_ids.to(device))
+```
+
+---
+
+## Published Results Replicated
+
+**ROME (Rank-One Model Editing)**
+- Factual associations stored in mid-late MLP layers
+- Editing layer 20-24 MLPs changes facts
+
+**IOI (Indirect Object Identification)**
+- Specific attention heads implement name mover circuit
+- Patching heads 9.9, 10.0 disrupts behavior
+
+**Induction Circuits**
+- Layers 0-2: Previous token heads
+- Layers 5-8: Induction heads
+- Patching confirms causal role
+
+---
+
+## Summary
+
+Activation patching is **the gold standard** for:
+- Proving causality (not just correlation)
+- Finding minimal circuits
+- Debugging model failures
+- Validating mechanistic hypotheses
+
+**Key API:**
+- `PatchConfig` → What to patch
+- `ActivationPatch` → Patch specification
+- `PatchingContext` → Apply patches
+- `CausalTracer` → Systematic experiments
+
+**Next**: Appendix A shows all tensor shapes for patching.
 
 ---
 

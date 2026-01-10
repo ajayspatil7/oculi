@@ -67,6 +67,16 @@ from oculi.utils.device import (
     auto_select_device,
 )
 
+# Activation Patching (Phase 2.3 - v0.6.0)
+from oculi.intervention import (
+    PatchConfig,
+    ActivationPatch,
+    PatchingResult,
+    PatchingSweepResult,
+    PatchingContext,
+    CausalTracer,
+)
+
 # Base adapter contract
 from oculi.models.base import (
     AttentionAdapter,
@@ -116,6 +126,14 @@ __all__ = [
     "is_mps_available",
     "is_cuda_available",
     "auto_select_device",
+
+    # Activation Patching (Phase 2.3)
+    "PatchConfig",
+    "ActivationPatch",
+    "PatchingResult",
+    "PatchingSweepResult",
+    "PatchingContext",
+    "CausalTracer",
 
     # Modules
     "models",
