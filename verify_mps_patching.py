@@ -333,8 +333,13 @@ def test_full_workflow(adapter, model, tokenizer, device):
 
         # Step 3: Capture clean activations
         print("\n  Step 3: Capturing clean activations...")
-        clean_capture = adapter.capture_full(clean_ids)
-        print(f"    ✓ Captured from {clean_capture.n_layers} layers")
+        from oculi import MLPConfig
+
+        clean_capture = adapter.capture_full(
+            clean_ids,
+            mlp_config=MLPConfig(capture_output=True)
+        )
+        print(f"    ✓ Captured from {clean_capture.mlp.n_layers} layers")
 
         # Step 4: Manual patch
         print("\n  Step 4: Applying manual patch...")
