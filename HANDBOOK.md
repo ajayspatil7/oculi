@@ -686,7 +686,12 @@ clean_ids = tokenizer.encode(clean_text, return_tensors="pt").to(device)
 corrupt_ids = tokenizer.encode(corrupt_text, return_tensors="pt").to(device)
 
 # Step 2: Capture clean activations
-clean_capture = adapter.capture_full(clean_ids)
+from oculi import MLPConfig
+
+clean_capture = adapter.capture_full(
+    clean_ids,
+    mlp_config=MLPConfig(capture_output=True)  # Enable MLP capture
+)
 
 # Step 3: Create a patch
 patch = ActivationPatch(
@@ -866,14 +871,20 @@ results = tracer.trace(
 Apply multiple patches simultaneously:
 
 ```python
+# Capture with configs
+clean_capture = adapter.capture_full(
+    clean_ids,
+    mlp_config=MLPConfig(capture_output=True)
+)
+
 patches = [
     ActivationPatch(
         PatchConfig(layer=20, component='mlp_out'),
         clean_capture.mlp.mlp_output[20]
     ),
     ActivationPatch(
-        PatchConfig(layer=21, component='attn_out'),
-        clean_capture.attention.attn_out[21]  # If captured
+        PatchConfig(layer=21, component='mlp_out'),
+        clean_capture.mlp.mlp_output[21]
     ),
 ]
 
