@@ -220,10 +220,10 @@ class ActivationPatch:
     
     def _expected_shape(self, adapter: 'AttentionAdapter') -> Tuple[int, ...]:
         """Get expected shape for source activation."""
-        hidden_dim = adapter.model.config.hidden_size
         head_dim = adapter.head_dim()
-        
-        if self.component in ('residual_pre_attn', 'residual_post_attn', 
+        hidden_dim = adapter.num_heads() * head_dim
+
+        if self.component in ('residual_pre_attn', 'residual_post_attn',
                               'residual_post_mlp', 'attn_out', 'mlp_out'):
             return (-1, hidden_dim)  # [T, H], T can vary
         elif self.component == 'head':

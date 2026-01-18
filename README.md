@@ -16,23 +16,23 @@ Oculi is a **research-first** mechanistic interpretability toolkit for transform
 
 **Comprehensive Capture System:**
 
-- ✅ **Attention Internals** — Q/K/V vectors, attention patterns with pre/post-RoPE options
-- ✅ **Residual Stream** — Activations at all intervention points (pre/post attention, pre/post MLP)
-- ✅ **MLP Internals** — Gate, up projections, activations, and outputs
-- ✅ **Layer-wise Logits** — Logit lens analysis with memory-efficient top-k
+-  **Attention Internals** — Q/K/V vectors, attention patterns with pre/post-RoPE options
+-  **Residual Stream** — Activations at all intervention points (pre/post attention, pre/post MLP)
+-  **MLP Internals** — Gate, up projections, activations, and outputs
+-  **Layer-wise Logits** — Logit lens analysis with memory-efficient top-k
 
 **Analysis Tools:**
 
-- 🔍 **Circuit Detection** — Automatic detection of induction heads, previous token heads, positional patterns
-- 📊 **Logit Lens** — Track prediction formation across layers
-- 📈 **Entropy & Norms** — Attention focus metrics, vector magnitudes
-- 🔗 **Correlation Analysis** — Statistical relationships with p-values
+-  **Circuit Detection** — Automatic detection of induction heads, previous token heads, positional patterns
+-  **Logit Lens** — Track prediction formation across layers
+-  **Entropy & Norms** — Attention focus metrics, vector magnitudes
+-  **Correlation Analysis** — Statistical relationships with p-values
 
 **Surgical Interventions:**
 
-- 🎯 **Q/K Scaling** — The Spectra method for attention sharpening/flattening
-- ❌ **Head Ablation** — Zero out specific attention heads
-- 🔄 **Activation Patching** — (Coming in v0.6.0)
+-  **Q/K Scaling** — The Spectra method for attention sharpening/flattening
+-  **Head Ablation** — Zero out specific attention heads
+-  **Activation Patching** — (Coming in v0.6.0)
 
 **Design Philosophy:**
 
@@ -66,9 +66,9 @@ pip install -e ".[all]"
 
 **Supported Devices:**
 
-- ✅ **CUDA** (NVIDIA GPUs)
-- ✅ **MPS** (Apple Silicon - M1/M2/M3/M4)
-- ✅ **CPU** (Fallback)
+-  **CUDA** (NVIDIA GPUs)
+-  **MPS** (Apple Silicon - M1/M2/M3/M4)
+-  **CPU** (Fallback)
 
 ---
 
@@ -108,7 +108,7 @@ print(f"Patterns: {capture.patterns.shape}") # [L, H, T, T] - [32, 32, 10, 10]
 
 ---
 
-## 🆕 Phase 1 Features (v0.3.0-dev)
+##  Phase 1 Features (v0.3.0-dev)
 
 ### Residual Stream Capture
 
@@ -252,7 +252,7 @@ lens_analysis = LogitLensAnalysis(tokenizer).layer_predictions(full.logits, -1)
 
 ---
 
-## 🆕 Phase 2 Features (v0.5.0-dev)
+##  Phase 2 Features (v0.5.0-dev)
 
 ### Attribution Methods
 
@@ -520,9 +520,9 @@ print(f"Layer 25, Head 10 entropy: {view.shape}")  # [T]
 
 | Model      | Adapter                 | Attention | Status |
 | ---------- | ----------------------- | --------- | ------ |
-| LLaMA 2/3  | `LlamaAttentionAdapter` | GQA       | ✅     |
-| Mistral    | Coming soon             | GQA       | 🔄     |
-| Qwen 2/2.5 | Coming soon             | GQA       | 🔄     |
+| LLaMA 2/3  | `LlamaAttentionAdapter` | GQA       |      |
+| Mistral    | Coming soon             | GQA       |      |
+| Qwen 2/2.5 | Coming soon             | GQA       |      |
 
 ---
 
@@ -530,40 +530,40 @@ print(f"Layer 25, Head 10 entropy: {view.shape}")  # [T]
 
 ```
 oculi/
-├── models/          # 🔥 PUBLIC model adapters
-│   ├── base.py      # AttentionAdapter contract
-│   └── llama/       # LLaMA family
-│       ├── adapter.py   # LlamaAttentionAdapter
-│       ├── attention.py # Q/K/V extraction, GQA, RoPE
-│       ├── anatomy.py   # Full model anatomy documentation
-│       └── notes.md     # Architecture details
-│
-├── capture/         # Capture utilities & data structures
-│   ├── structures.py    # AttentionCapture, ResidualCapture, MLPCapture, etc.
-│   └── hooks.py         # Hook management
-│
-├── analysis/        # Pure analysis functions
-│   ├── entropy.py       # Entropy metrics
-│   ├── norms.py         # Vector norms
-│   ├── circuits.py      # Circuit detection
-│   ├── logit_lens.py    # Logit lens analysis
-│   ├── attribution.py   # Attribution methods ✨ PHASE 2
-│   ├── composition.py   # Head composition ✨ PHASE 2
-│   ├── correlation.py   # Statistical analysis
-│   └── stratified.py    # Slicing helpers
-│
-├── intervention/    # Intervention definitions
-│   ├── scalers.py       # Q/K/Spectra scaling
-│   ├── ablation.py      # Head ablation
-│   └── context.py       # Context manager
-│
-├── visualize/       # Research-quality plots
-│   ├── entropy.py
-│   ├── correlation.py
-│   └── intervention.py
-│
-└── _private/        # Private implementation
-    └── hooks/           # Hook implementations
+ models/          #  PUBLIC model adapters
+    base.py      # AttentionAdapter contract
+    llama/       # LLaMA family
+        adapter.py   # LlamaAttentionAdapter
+        attention.py # Q/K/V extraction, GQA, RoPE
+        anatomy.py   # Full model anatomy documentation
+        notes.md     # Architecture details
+
+ capture/         # Capture utilities & data structures
+    structures.py    # AttentionCapture, ResidualCapture, MLPCapture, etc.
+    hooks.py         # Hook management
+
+ analysis/        # Pure analysis functions
+    entropy.py       # Entropy metrics
+    norms.py         # Vector norms
+    circuits.py      # Circuit detection
+    logit_lens.py    # Logit lens analysis
+    attribution.py   # Attribution methods  PHASE 2
+    composition.py   # Head composition  PHASE 2
+    correlation.py   # Statistical analysis
+    stratified.py    # Slicing helpers
+
+ intervention/    # Intervention definitions
+    scalers.py       # Q/K/Spectra scaling
+    ablation.py      # Head ablation
+    context.py       # Context manager
+
+ visualize/       # Research-quality plots
+    entropy.py
+    correlation.py
+    intervention.py
+
+ _private/        # Private implementation
+     hooks/           # Hook implementations
 ```
 
 **Design Principles:**
@@ -600,18 +600,18 @@ circuits = CircuitDetection.detect_induction_heads(capture)
 
 ## Roadmap
 
-### ✅ Phase 1 (v0.3.0 - v0.4.0) - Complete
+###  Phase 1 (v0.3.0 - v0.4.0) - Complete
 
-- ✅ Residual stream capture
-- ✅ MLP internals capture
-- ✅ Logit lens analysis
-- ✅ Circuit detection primitives
-- ✅ Unified full capture
+-  Residual stream capture
+-  MLP internals capture
+-  Logit lens analysis
+-  Circuit detection primitives
+-  Unified full capture
 
-### 🔄 Phase 2 (v0.5.0 - v0.6.0) - In Progress
+###  Phase 2 (v0.5.0 - v0.6.0) - In Progress
 
-- ✅ **Attribution methods** (v0.5.0) - attention flow, value-weighted attention, direct logit attribution, component attribution, head attribution
-- ✅ **Head composition analysis** (v0.5.0) - QK/OV composition, virtual attention, path patching, composition matrices, induction circuit detection
+-  **Attribution methods** (v0.5.0) - attention flow, value-weighted attention, direct logit attribution, component attribution, head attribution
+-  **Head composition analysis** (v0.5.0) - QK/OV composition, virtual attention, path patching, composition matrices, induction circuit detection
 - [ ] Activation patching (causal interventions)
 - [ ] SAE integration
 - [ ] Probing & steering vectors
@@ -623,7 +623,7 @@ circuits = CircuitDetection.detect_induction_heads(capture)
 - [ ] Export formats (HDF5, JSON, NumPy)
 - [ ] TransformerLens compatibility
 
-### 🎯 Phase 4 (v1.0.0) - Future
+###  Phase 4 (v1.0.0) - Future
 
 - [ ] API freeze
 - [ ] Complete documentation
@@ -657,7 +657,7 @@ If you use Oculi in your research, please cite:
 
 ## Contributing
 
-Contributions welcome! Please see the [implementation plan](.claude/plans/inherited-fluttering-owl.md) for current priorities.
+Contributions welcome! Please see [PLAN.md](PLAN.md) for the development roadmap and current priorities.
 
 ---
 

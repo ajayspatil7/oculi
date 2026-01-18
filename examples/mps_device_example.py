@@ -91,7 +91,7 @@ def main():
         attn_cpu = attn.cpu()
         print(f"CPU Attention: shape={attn_cpu.shape}, device={attn_cpu.device}")
 
-        print("✓ All MPS operations successful!")
+        print(" All MPS operations successful!")
     else:
         print("\n5. MPS not available - skipping MPS tests")
 

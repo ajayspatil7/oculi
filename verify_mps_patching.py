@@ -41,14 +41,14 @@ def verify_device():
     print_section("Test 1: Device Detection")
 
     if not is_mps_available():
-        print("\n❌ MPS not available on this system!")
+        print("\n MPS not available on this system!")
         print("This script requires Apple Silicon (M1/M2/M3/M4)")
         return None
 
     device_info = get_device_info()
     device = get_default_device()
 
-    print(f"\n✓ MPS Available")
+    print(f"\n MPS Available")
     print(f"  Device: {device}")
     print(f"  Device Name: {device_info.device_name}")
     print(f"  PyTorch Version: {device_info.pytorch_version}")
@@ -74,14 +74,14 @@ def load_model(device):
         )
         tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-        print(f"\n✓ Model loaded successfully")
+        print(f"\n Model loaded successfully")
         print(f"  Model device: {next(model.parameters()).device}")
         print(f"  Model dtype: {next(model.parameters()).dtype}")
 
         return model, tokenizer
 
     except Exception as e:
-        print(f"\n❌ Model loading failed: {e}")
+        print(f"\n Model loading failed: {e}")
         return None, None
 
 
@@ -103,14 +103,14 @@ def test_patch_config(adapter):
     for i, config in enumerate(configs):
         try:
             config.validate(adapter)
-            print(f"  ✓ Config {i+1}: L{config.layer} {config.component} "
+            print(f"   Config {i+1}: L{config.layer} {config.component} "
                   f"{'H'+str(config.head) if config.head is not None else ''} "
                   f"{'tokens='+str(config.tokens) if config.tokens else ''}")
         except Exception as e:
-            print(f"  ❌ Config {i+1} validation failed: {e}")
+            print(f"   Config {i+1} validation failed: {e}")
             return False
 
-    print("\n✓ All PatchConfig objects created and validated")
+    print("\n All PatchConfig objects created and validated")
     return True
 
 
@@ -146,7 +146,7 @@ def test_activation_patch(adapter, device):
         )
         patch1.validate(adapter)
         patches.append(patch1)
-        print(f"  ✓ MLP patch created: {capture.mlp.mlp_output[15].shape} on {capture.mlp.mlp_output[15].device}")
+        print(f"   MLP patch created: {capture.mlp.mlp_output[15].shape} on {capture.mlp.mlp_output[15].device}")
 
         # Residual stream patch
         patch2 = ActivationPatch(
@@ -155,17 +155,17 @@ def test_activation_patch(adapter, device):
         )
         patch2.validate(adapter)
         patches.append(patch2)
-        print(f"  ✓ Residual patch created: {capture.residual.post_mlp[20].shape} on {capture.residual.post_mlp[20].device}")
+        print(f"   Residual patch created: {capture.residual.post_mlp[20].shape} on {capture.residual.post_mlp[20].device}")
 
         # Verify all patches are on MPS
         for i, patch in enumerate(patches):
             assert patch.source_activation.device.type == 'mps', f"Patch {i} not on MPS!"
 
-        print(f"\n✓ All patches created and on MPS device")
+        print(f"\n All patches created and on MPS device")
         return True
 
     except Exception as e:
-        print(f"\n❌ Patch creation failed: {e}")
+        print(f"\n Patch creation failed: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -203,27 +203,27 @@ def test_patching_context(adapter, model, device):
         # Test context manager
         print("  Entering PatchingContext...")
         with PatchingContext(adapter, [patch]) as ctx:
-            print(f"    ✓ Context entered (hooks active)")
+            print(f"     Context entered (hooks active)")
 
             # Run model with patch
             print("    Running model with patch...")
             with torch.no_grad():
                 output = model(corrupt_ids)
 
-            print(f"    ✓ Model ran successfully")
+            print(f"     Model ran successfully")
             print(f"    Output shape: {output.logits.shape}")
             print(f"    Output device: {output.logits.device}")
 
-        print("  ✓ Context exited (hooks cleaned up)")
+        print("   Context exited (hooks cleaned up)")
 
         # Verify hooks are cleaned up
         assert len(ctx._hook_handles) == 0, "Hooks not cleaned up!"
 
-        print("\n✓ PatchingContext manager working correctly")
+        print("\n PatchingContext manager working correctly")
         return True
 
     except Exception as e:
-        print(f"\n❌ PatchingContext failed: {e}")
+        print(f"\n PatchingContext failed: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -268,7 +268,7 @@ def test_causal_tracer(adapter, model, device):
             verbose=True,
         )
 
-        print(f"\n  ✓ Trace completed!")
+        print(f"\n   Trace completed!")
         print(f"    Total results: {len(results.results)}")
 
         # Analyze results
@@ -285,11 +285,11 @@ def test_causal_tracer(adapter, model, device):
         print(f"    Max recovery: {matrix.max().item():.3f}")
         print(f"    Mean recovery: {matrix.mean().item():.3f}")
 
-        print("\n✓ CausalTracer working correctly on MPS")
+        print("\n CausalTracer working correctly on MPS")
         return True
 
     except Exception as e:
-        print(f"\n❌ CausalTracer failed: {e}")
+        print(f"\n CausalTracer failed: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -339,7 +339,7 @@ def test_full_workflow(adapter, model, tokenizer, device):
             clean_ids,
             mlp_config=MLPConfig(capture_output=True)
         )
-        print(f"    ✓ Captured from {clean_capture.mlp.n_layers} layers")
+        print(f"     Captured from {clean_capture.mlp.n_layers} layers")
 
         # Step 4: Manual patch
         print("\n  Step 4: Applying manual patch...")
@@ -377,7 +377,7 @@ def test_full_workflow(adapter, model, tokenizer, device):
             verbose=False,
         )
 
-        print(f"    ✓ Traced {len(results.results)} components")
+        print(f"     Traced {len(results.results)} components")
 
         # Step 6: Analyze
         print("\n  Step 6: Analyzing results...")
@@ -387,7 +387,7 @@ def test_full_workflow(adapter, model, tokenizer, device):
         for i, r in enumerate(top_5):
             print(f"      {i+1}. L{r.config.layer} {r.config.component}: {r.recovery:.3f}")
 
-        print("\n✓ Complete workflow successful!")
+        print("\n Complete workflow successful!")
         print("\n" + "=" * 70)
         print("  ALL ACTIVATION PATCHING TESTS PASSED ON MPS!")
         print("=" * 70)
@@ -395,7 +395,7 @@ def test_full_workflow(adapter, model, tokenizer, device):
         return True
 
     except Exception as e:
-        print(f"\n❌ Workflow failed: {e}")
+        print(f"\n Workflow failed: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -411,19 +411,19 @@ def main():
     # Test 1: Device detection
     device = verify_device()
     if device is None or device.type != 'mps':
-        print("\n❌ MPS not available. Exiting.")
+        print("\n MPS not available. Exiting.")
         return
 
     # Test 2: Model loading
     model, tokenizer = load_model(device)
     if model is None:
-        print("\n❌ Model loading failed. Exiting.")
+        print("\n Model loading failed. Exiting.")
         return
 
     # Create adapter
     print_section("Creating Adapter")
     adapter = LlamaAttentionAdapter(model, tokenizer)
-    print(f"✓ Adapter created")
+    print(f" Adapter created")
     print(f"  Device: {adapter.device}")
     print(f"  Layers: {adapter.num_layers()}")
     print(f"  Heads: {adapter.num_heads()}")
@@ -446,7 +446,7 @@ def main():
             print("\n\nTests interrupted by user.")
             return
         except Exception as e:
-            print(f"\n❌ Test '{name}' crashed: {e}")
+            print(f"\n Test '{name}' crashed: {e}")
             import traceback
             traceback.print_exc()
             results.append((name, False))
@@ -457,7 +457,7 @@ def main():
     print("=" * 70)
 
     for name, success in results:
-        status = "✓ PASS" if success else "❌ FAIL"
+        status = " PASS" if success else " FAIL"
         print(f"  {status:8} {name}")
 
     total = len(results)
@@ -466,10 +466,10 @@ def main():
     print(f"\n  Total: {passed}/{total} tests passed")
 
     if passed == total:
-        print("\n  🎉 ALL TESTS PASSED!")
+        print("\n   ALL TESTS PASSED!")
         print("  Activation patching is fully functional on MPS")
     else:
-        print(f"\n  ⚠️  {total - passed} test(s) failed")
+        print(f"\n    {total - passed} test(s) failed")
 
     print("=" * 70)
 

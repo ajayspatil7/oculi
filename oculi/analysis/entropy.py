@@ -5,7 +5,7 @@ Entropy Analysis
 Compute entropy metrics from attention patterns.
 
 Mathematical Reference (from API_CONTRACT.md):
-    Shannon Entropy: H(t) = -Σⱼ₌₀ᵗ p(j|t) · log(p(j|t))
+    Shannon Entropy: H(t) = -Σ₌₀ᵗ p(j|t) · log(p(j|t))
     Effective Rank: exp(H)
 """
 
@@ -45,7 +45,7 @@ class EntropyAnalysis:
             First `ignore_first` positions are NaN.
             
         Formula:
-            H(t) = -Σⱼ₌₀ᵗ p(j|t) · log(p(j|t))
+            H(t) = -Σ₌₀ᵗ p(j|t) · log(p(j|t))
             
             Where p(j|t) = attention weight from token t to token j
             Only sums over j ≤ t (causal masking)

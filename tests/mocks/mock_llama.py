@@ -1089,10 +1089,10 @@ def create_mock_adapter(
 # =============================================================================
 
 if __name__ == "__main__":
-    print("🔧 Creating MockLlamaAdapter...")
+    print(" Creating MockLlamaAdapter...")
     adapter = MockLlamaAdapter()
     
-    print(f"\n📊 Model Architecture:")
+    print(f"\n Model Architecture:")
     print(f"   Layers: {adapter.num_layers()}")
     print(f"   Query Heads: {adapter.num_heads()}")
     print(f"   KV Heads: {adapter.num_kv_heads()}")
@@ -1100,7 +1100,7 @@ if __name__ == "__main__":
     print(f"   Attention Type: {adapter.attention_structure().attention_type}")
     print(f"   GQA Ratio: {adapter.attention_structure().gqa_ratio}:1")
     
-    print("\n🎯 Testing capture...")
+    print("\n Testing capture...")
     input_ids = adapter.tokenize("Hello, this is a test!")
     print(f"   Input shape: {input_ids.shape}")
     
@@ -1110,4 +1110,4 @@ if __name__ == "__main__":
     print(f"   Values shape: {capture.values.shape}")
     print(f"   Patterns shape: {capture.patterns.shape}")
     
-    print("\n✅ Mock LLaMA adapter working correctly!")
+    print("\n Mock LLaMA adapter working correctly!")

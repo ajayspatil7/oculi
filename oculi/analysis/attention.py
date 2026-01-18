@@ -34,7 +34,7 @@ class AttentionAnalysis:
             Tensor of shape [n_layers, n_heads, n_tokens]
             
         Formula:
-            max_attn(t) = maxⱼ≤ₜ p(j|t)
+            max_attn(t) = max≤ₜ p(j|t)
             
         Interpretation:
             High max_weight → attention concentrated on one token

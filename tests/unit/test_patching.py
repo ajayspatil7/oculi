@@ -67,7 +67,7 @@ class TestPatchConfig:
         adapter = MockLlamaAdapter()
 
         # Valid config
-        config = PatchConfig(layer=5, component='mlp_out')
+        config = PatchConfig(layer=2, component='mlp_out')
         config.validate(adapter)  # Should not raise
 
         # Invalid layer (out of range)
@@ -76,7 +76,7 @@ class TestPatchConfig:
             config_bad.validate(adapter)
 
         # Invalid head
-        config_bad_head = PatchConfig(layer=5, component='head', head=999)
+        config_bad_head = PatchConfig(layer=2, component='head', head=999)
         with pytest.raises(ValueError, match="out of range"):
             config_bad_head.validate(adapter)
 
@@ -118,7 +118,7 @@ class TestActivationPatch:
         adapter = MockLlamaAdapter()
 
         # Wrong shape for mlp_out (should be [T, hidden_size])
-        config = PatchConfig(layer=5, component='mlp_out')
+        config = PatchConfig(layer=2, component='mlp_out')
         wrong_activation = torch.randn(10, 999)  # Wrong hidden size
 
         patch = ActivationPatch(config=config, source_activation=wrong_activation)
